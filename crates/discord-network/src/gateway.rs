@@ -192,7 +192,11 @@ async fn connection(
     let mut ack = true;
     let mut sequence: Option<u64> = resume.sequence;
     let mut ready = false;
-    let mut active = None;
+    let mut active = if resume.session.is_some() {
+        *selected.borrow()
+    } else {
+        None
+    };
     let mut members = MemberList::default();
     let mut voice: BTreeMap<u64, ChannelId> = BTreeMap::new();
     let readiness = tokio::time::sleep(Duration::from_secs(30));
@@ -372,8 +376,9 @@ mod tests {
             assert_eq!(resume["op"], 6);
             assert_eq!(resume["d"]["seq"], 42);
             assert_eq!(resume["d"]["session_id"], "synthetic-session");
+            ws.send(Message::Text(json!({"op":0,"s":43,"t":"MESSAGE_CREATE","d":{"channel_id":"20","id":"50","author":{"id":"40","username":"Test"},"content":"Replayed","timestamp":"2026-10-07T10:00:00Z"}}).to_string().into())).await.unwrap();
             ws.send(Message::Text(
-                json!({"op":0,"s":43,"t":"RESUMED","d":{}})
+                json!({"op":0,"s":44,"t":"RESUMED","d":{}})
                     .to_string()
                     .into(),
             ))
@@ -423,7 +428,10 @@ mod tests {
             .unwrap()
             .is_err()
         );
-        assert_eq!(resume.sequence, Some(43));
+        assert_eq!(resume.sequence, Some(44));
+        assert!(
+            matches!(rx.try_recv().unwrap(),Event::Message(_,message) if message.text=="Replayed")
+        );
         assert!(matches!(rx.try_recv().unwrap(), Event::Realtime(true)));
         server.await.unwrap();
         resume.reset();

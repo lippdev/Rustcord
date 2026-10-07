@@ -25,7 +25,7 @@ pub(super) struct OnlineView {
     members_loaded: bool,
     members_started: Option<Instant>,
     voice: Vec<(u64, ChannelId)>,
-    realtime: bool,
+    realtime: Option<bool>,
     hide_members: bool,
     refresh_due: Option<Instant>,
     deleted: HashSet<MessageId>,
@@ -122,7 +122,20 @@ impl OnlineView {
                 self.status = "Histórico carregado.";
             }
             Event::Image(url, image) => self.images.accept(ctx, url, image),
-            Event::Realtime(connected) => self.realtime = connected,
+            Event::Realtime(connected) => {
+                self.realtime = Some(connected);
+                if connected
+                    && self.snapshot.as_ref().is_some_and(|s| {
+                        s.servers.iter().flat_map(|s| &s.channels).any(|c| {
+                            Some(c.id) == self.channel
+                                && c.details.kind == discord_core::ChannelKind::Text
+                        })
+                    })
+                {
+                    self.refresh_due
+                        .get_or_insert(Instant::now() + Duration::from_millis(750));
+                }
+            }
             Event::Members(server, channel, members)
                 if self.server == Some(server) && self.channel == Some(channel) =>
             {
@@ -335,6 +348,8 @@ mod tests {
             reply_to: None,
             details: Default::default(),
         };
+        view.apply(Event::Realtime(true), &ctx);
+        assert!(view.refresh_due.is_some());
         view.apply(Event::Message(channel, message(12)), &ctx);
         view.apply(Event::Deleted(channel, vec![MessageId::new(10)]), &ctx);
         view.apply(
@@ -397,7 +412,7 @@ mod tests {
                 status: "online".into(),
             }],
             members_loaded: true,
-            realtime: true,
+            realtime: Some(true),
             ..Default::default()
         };
         let mut output = ctx.run_ui(

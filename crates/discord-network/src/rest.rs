@@ -283,9 +283,11 @@ pub(crate) fn parse_message(value: &Value) -> Result<Message, &'static str> {
     if let Some(items) = value["attachments"].as_array() {
         for item in items.iter().take(10) {
             if let Some(url) = safe_media(&item["url"]) {
-                let image = item["content_type"].as_str().is_some_and(|s| {
-                    matches!(s, "image/png" | "image/jpeg" | "image/webp" | "image/gif")
-                });
+                let image = item["width"].as_u64().is_some_and(|n| n > 0)
+                    && item["height"].as_u64().is_some_and(|n| n > 0)
+                    || item["content_type"].as_str().is_some_and(|s| {
+                        matches!(s, "image/png" | "image/jpeg" | "image/webp" | "image/gif")
+                    });
                 attachments.push(Attachment {
                     name: optional_text(item, "filename", 512),
                     url,

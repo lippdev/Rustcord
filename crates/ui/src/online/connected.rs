@@ -349,7 +349,11 @@ impl OnlineView {
                 } else if self.members.is_empty() {
                     let text = if self.members_loaded {
                         "Nenhum membro retornado para este canal."
-                    } else if self.realtime {
+                    } else if self.realtime == Some(true)
+                        && self.members_started.is_some_and(|started| {
+                            started.elapsed() < std::time::Duration::from_secs(20)
+                        })
+                    {
                         "Carregando membros do canal…"
                     } else {
                         "Lista de membros indisponível. Reconecte para tentar novamente."
@@ -423,7 +427,7 @@ impl OnlineView {
                 });
                 ui.horizontal(|ui| {
                     if self.busy {ui.spinner();}
-                    let status=if self.realtime {"● Atualização ao vivo"}else{"Atualização ao vivo desconectada · use Atualizar"};
+                    let status=match self.realtime {Some(true)=>"● Atualização ao vivo",Some(false)=>"Atualização ao vivo desconectada · use Atualizar",None=>"Conectando atualização ao vivo…"};
                     ui.add(egui::Label::new(RichText::new(format!("{status} · {}",self.status)).size(11.0).color(MUTED)).truncate()).on_hover_text(self.status);
                 });
             });
