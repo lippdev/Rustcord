@@ -10,20 +10,28 @@ primeiro um Discord nativo em Rust, com design e usabilidade familiares.
    escolhida pelo usuário, melhorar tipografia/ícones, seleção/cópia de texto,
    mensagens agrupadas, scroll/virtualização, composer multiline/IME, atalhos,
    menus e acessibilidade. Validar Windows/DPI e medir startup/working set/CPU.
-3. **Gate da API oficial**: confirmar caso de uso suportado/aprovado. OAuth2 não
-   autoriza automaticamente um substituto completo de contas pessoais. Se não
-   houver API adequada, manter mock ou adaptar a companion oficialmente permitido.
-4. **Backend autorizado**: OAuth2 e armazenamento seguro quando aplicáveis,
-   REST/rate-limit, Gateway/reconnect/intents, cache limitado e eventos separados.
-5. **Chat completo dentro das capabilities**: servidores/canais/DMs, attachments,
-   reactions, notificações, busca e deep links conforme acesso oficial disponível.
+3. **Discovery do backend nativo**: [concluída](native-backend-discovery.md).
+   Objetivo confirmado: conta pessoal e ausência de WebView. Serein é candidato
+   a reaproveitamento seletivo; [spike QR nativo implementado](native-connection.md),
+   com aprovação QR e leituras reais observadas no macOS. OAuth2
+   comum não libera um substituto completo, e interoperabilidade não é aprovação.
+4. **Backend alternativo nativo**: começar com IDs estáveis e comandos/eventos
+   assíncronos; depois REST/rate-limit, Gateway/reconnect/Resume, cache limitado,
+   autenticação nativa e cofre do sistema. Validar primeiro com transportes locais
+   e depois com uma sessão controlada pelo dono da conta. IDs/filas e login QR
+   com leituras HTTPS estão implementados; Gateway e cofre seguem pendentes.
+5. **Chat conectado**: servidores/canais/DMs e mensagens primeiro; depois
+   attachments, reactions, notificações, busca e deep links, conforme capacidades
+   efetivamente implementadas e verificadas.
 6. **Áudio e distribuição**: voice/mute/deafen/volume via integração permitida;
    launcher/auto-update assinado, overlay isolado e serviços de plataforma.
 7. **Controle e Console Mode**: reavaliar depois da usabilidade desktop. Adaptador
    de actions pode ser reaproveitado, sem ditar o visual ou acoplar o projeto.
 
-Não implementar self-bots, tokens pessoais ou endpoints privados. Voice, vídeo,
-streaming, Activities, plugins e overlay continuam fora da fundação inicial.
+Não automatizar ações abusivas, extrair credenciais de outros aplicativos ou
+contornar MFA/CAPTCHA/restrições do serviço. Voice, vídeo, streaming, Activities,
+plugins e overlay continuam fora da fundação inicial. A discovery registra os
+limites dos termos e as incertezas da conexão alternativa; não houve sessão real.
 
 ## Progresso M2 — composer e ações de mensagem
 
@@ -32,8 +40,19 @@ isolados, proteção de envio durante composição IME/repeat, menu contextual
 (mouse/F2), cópia de texto, resposta editável com referência e cancelamento por
 Escape. Tudo permanece local/mock, sem dependências novas.
 
-Próximo incremento recomendado: agrupamento de mensagens por autor/horário e
+Para o modo local, próximo incremento: agrupamento de mensagens por autor/horário e
 histórico virtualizado, preservando scroll ao receber mensagens/alterar canal.
 Validar longos históricos, seleção/cópia e resize; testar Windows/MSVC com GPU,
 DPI e IMEs reais antes de release. A fidelidade visual ainda exige refinamento de
 ícones/tipografia e comparação com uma referência desktop específica do Discord.
+
+## Progresso da conexão nativa
+
+Implementados: login QR sem WebView, confirmação no celular, nonce RSA, heartbeat
+com ACK, expiração/cancelamento e sessão em memória. Leitura de perfil/servidores,
+canais de texto e últimas 50 mensagens, com atualização manual, limites de payload
+e tratamento de 401/403/429. Testes locais não comprovam login live.
+
+QR e leituras reais foram observados com o dono da conta. Próximo passo: envio explícito e
+Gateway com heartbeat, reconexão/Resume e eventos create/update/delete. Não há
+medição comparativa que demonstre economia de RAM em uma sessão equivalente.

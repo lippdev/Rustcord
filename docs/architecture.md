@@ -3,13 +3,27 @@
 Nome definido pelo usuário. Projeto independente, Rust, Windows primeiro. Milestone 1 é
 uma demonstração local de UX, não um cliente conectado ao Discord.
 
+## Direção após a discovery de clientes nativos
+
+O usuário confirmou o objetivo de um cliente alternativo de conta pessoal sem
+WebView. A [discovery](native-backend-discovery.md) compara implementações,
+licenças, login e um experimento de extração do backend Serein. Essa direção
+substitui a proposta de converter o produto em companion/bot. As restrições de
+API descritas abaixo permanecem relevantes, mas aprovação oficial não é uma
+dependência técnica de compilação/conexão. Interoperabilidade e autorização
+contratual são questões distintas. A discovery não implementou autenticação.
+O incremento seguinte adiciona [QR nativo e leituras HTTPS](native-connection.md),
+com aprovação QR e leituras reais observadas no macOS. A demonstração mock segue disponível.
+
 ## Pesquisa e limite de produto (07/10/2026)
 
 A API oficial não oferece autorização geral para substituir o cliente de uma
 conta pessoal. [Self-bots](https://support.discord.com/hc/en-us/articles/115002192352-Automated-User-Accounts-Self-Bots)
-são expressamente proibidos e podem causar encerramento da conta. Não coletar
-senhas/tokens pessoais, reproduzir endpoints privados, impersonar o cliente,
-extrair tokens do browser nem contornar CAPTCHA ou restrições.
+são expressamente proibidos e podem causar encerramento da conta. O usuário
+escolheu interoperabilidade de um cliente nativo independente; isso não implica
+aprovação oficial. O login QR usa Remote Auth v2, um protocolo não OAuth público.
+Não pedir senha/token manual, extrair sessões de outros aplicativos, impersonar
+um navegador ou contornar MFA/CAPTCHA.
 
 [OAuth2](https://docs.discord.com/developers/topics/oauth2) permite apenas os
 scopes autorizados: identify/guilds não equivalem a ler/enviar todas as mensagens
@@ -19,16 +33,16 @@ de independência. Social SDK tem comunicação com acesso limitado e termos
 próprios; não assumir que autoriza um cliente geral de guilds/DMs.
 Bots são identidades próprias, com permissões/intents, não substitutos da conta
 pessoal. [Developer Policy](https://docs.discord.com/developers/policies/developer-policy)
-exige respeito a privacidade, autorização e limites. Uma integração real exige
-revisão do caso de uso e escopo oficialmente disponível/aprovado. O roadmap pode
-precisar virar um companion para bots/SDK, se não houver autorização apropriada.
+exige respeito a privacidade, autorização e limites. O projeto permanece um
+cliente alternativo de conta pessoal, conforme a direção confirmada pelo usuário.
+As capacidades e limitações são documentadas sem presumir suporte oficial.
 
 Fontes consultadas: artigo oficial acima e arquivos atuais do repositório oficial
 [discord-api-docs](https://github.com/discord/discord-api-docs/tree/main/developers)
 (`topics/oauth2.mdx`, `policies/developer-policy.mdx`,
 `discord-social-sdk/core-concepts/oauth2-scopes.mdx`). As páginas web de docs
 retornaram HTTP 403 aqui; os respectivos fontes oficiais foram acessíveis.
-A Developer Policy completa foi consultada também no [suporte oficial](https://support-dev.discord.com/hc/en-us/articles/8563934450327-Discord-Developer-Policy); o arquivo do repositório aponta para essa página. Não há autenticação, HTTP, WebSocket ou segredos neste milestone.
+A Developer Policy completa foi consultada também no [suporte oficial](https://support-dev.discord.com/hc/en-us/articles/8563934450327-Discord-Developer-Policy); o arquivo do repositório aponta para essa página. O milestone inicial era inteiramente mock; a conexão experimental é descrita abaixo.
 
 ## Comparação de UI
 
@@ -59,7 +73,7 @@ antes de fixar uma política definitiva de velocidade versus tamanho.
 ## Dependências e direção de dados
 
 ```text
-backend autorizado futuro -> BackendEvent -> AppState/reducer -> Ui view
+backend nativo -> SessionEvent -> AppState/reducer -> Ui view
                                               ^                    |
 mouse / teclado / gilrs -> AppAction -----------+ <-----------------+
 platform -> amostragem de métricas / futuros serviços de SO
@@ -67,7 +81,9 @@ app -> composição, janela, lifecycle
 ```
 
 - `discord-core`: modelos de domínio, trait `Backend`, capabilities e mock.
-  Não importa UI/input. Futuro REST/Gateway é um adaptador atrás da trait.
+  Não importa UI/input.
+- `discord-network`: QR/Remote Auth v2, worker Tokio e leituras HTTPS com
+  reqwest/rustls. Não importa UI/input; reutiliza os modelos do domínio.
 - `app-state`: seleção, foco por região/item, telas e reducer puro.
 - `input`: ações sem domínio Discord e mapeamento de teclado. Deadzone,
   histerese e worker de gamepad ficam em módulo opcional fora do app padrão.
@@ -76,12 +92,51 @@ app -> composição, janela, lifecycle
 - `platform`: métricas RSS/working set e futuros serviços nativos.
 - `app`: binário, composição e opções de execução.
 
+## Fundação do backend nativo
+
+`AccountId`, `ServerId`, `ChannelId` e `MessageId` são tipos distintos sobre u64.
+Índices continuam apenas como posição de navegação da UI. A troca de snapshot
+valida IDs duplicados antes de alterar o estado, restaura seleção por identidade
+(inclusive quando um canal muda de servidor) e descarta rascunhos de canais
+removidos ou de outra conta. IDs locais esgotados não fazem overflow nem apagam
+o texto não enviado.
+
+`backend_channel` separa `BackendConnection` (UI) de `BackendWorker` (adaptador),
+com 16 slots de comandos e 16 de eventos. A UI usa apenas operações não
+bloqueantes. Publicação numa fila cheia devolve o evento ao produtor; o mock
+retém um snapshot pendente para tentar novamente. Um callback sem dependência
+de egui acorda a UI após publicação, sem um timer permanente de polling.
+`wait_command` bloqueia apenas um worker dedicado; não deve rodar na UI nem
+diretamente num executor Tokio. O adaptador de rede futuro precisará conectar
+esse transporte ao seu runtime e limitar também bytes decodificados: limites
+de slots sozinhos não limitam o tamanho de snapshots.
+
+Eventos carregam `SessionGeneration`; `begin_session` avança a geração e limpa
+estado/rascunhos. Eventos de gerações anteriores são ignorados. Reconnect da
+mesma sessão não deve chamar `begin_session`. Cancelar ou soltar a conexão
+marca cancelamento, fecha o sender de comandos e solta a fila de eventos;
+cancelamento não depende de haver um slot livre. O coordenador futuro deve
+cancelar a conexão antiga antes de iniciar outra. O editor e o scroll também
+incluem a geração, impedindo undo de texto de uma sessão anterior.
+
+O app solicita o snapshot inicial por esse transporte e o mock o entrega antes
+das ações de UI no primeiro frame. `RequestSnapshot` é o único comando de backend
+na demonstração local; mensagens e reações continuam no reducer local. Requisitar
+outro snapshot mock repõe seus dados de demonstração. O modo conectado usa o
+worker independente de `discord-network`; veja [o fluxo e os limites](native-connection.md).
+Não há cofre ou código Serein incorporado.
+
 Evitar a dependência cíclica UI/input: as duas produzem comandos, estado é a
 fonte de verdade. Backend futuro deve emitir eventos em fila limitada com
 cancelamento/backpressure; UI não espera rede. Cache de mensagens limitado e
-paginação/virtualização necessários antes de dados reais. Tokio + reqwest
-(rustls, features mínimas) e tokio-tungstenite são opções maduras para o futuro,
-mas não entram no lockfile como networking da aplicação agora.
+paginação/virtualização necessários para expandir o histórico. O modo conectado
+limita a leitura a 50 mensagens do canal atual; usa Tokio, reqwest/rustls e
+tokio-tungstenite. Possui filas de oito slots e cancelamento da tarefa inteira,
+inclusive com I/O pendente ou fila cheia. Cada tentativa possui seu próprio
+receiver; sair/cancelar descarta a tentativa e todos os seus eventos.
+A tela de leitura mantém seleção por IDs em `OnlineView`, separada do reducer
+de edição local, para não simular envio/reação em canais reais. Unificar a
+coordenação de sessão no reducer será necessário ao implementar envio/Gateway.
 
 Pesquisa para etapa futura, desativada no app atual: **gilrs 0.11.2**, mapeamentos padronizados, hotplug, Windows Gaming Input (WGI) padrão no Windows,
 udev no Linux. SDL3 é alternativa abrangente mas acrescenta runtime/build C;
@@ -113,7 +168,8 @@ não resolvem autenticação de contas pessoais nem fornecem a UI oficial.
 
 Mouse seleciona servidores/canais e permite scroll; editor permite digitar e enviar
 com Enter. Clique direito abre ações locais de mensagem. F1 abre configuração,
-Escape fecha, atalhos de seleção ficam na camada de actions. Tudo é mock.
+Escape fecha, atalhos de seleção ficam na camada de actions. Essas interações
+pertencem à demonstração mock; a conexão inicial oferece apenas leitura.
 Gamepad permanece apenas como módulo experimental opcional (`input/gamepad`),
 fora do build e runtime padrão. Não há worker de gamepad ou dependência gilrs no
 aplicativo padrão. Integração com controles/Console Mode deve ser reconsiderada
@@ -126,9 +182,10 @@ Unicode e ID opcional da mensagem respondida. `UpdateDraft`, `SendDraft`,
 `ReplyTo` e `CancelReply` são comandos independentes do dispositivo. A UI mantém
 somente o buffer do editor e estado de composição/foco. Cada conversa tem um ID
 egui distinto, isolando cursor e undo. Rascunhos vivem só em memória, limitados
-pelos canais do snapshot mock; as chaves atuais são índices servidor/canal.
-Antes de snapshots reais/reordenação, migrar para IDs estáveis de conversa e
-estabelecer orçamento global/expiração para rascunhos e estado dos editores.
+pelos canais do snapshot; as chaves são identidades conta/canal. Editor, undo e
+scroll incluem também a geração da sessão. Antes de dados reais, estabelecer
+orçamento global/expiração para rascunhos e estado dos editores, além de limites
+de bytes nos adaptadores de protocolo.
 
 Enter envia apenas sem modificadores, com foco no editor, sem repetição e sem
 composição IME ativa; Shift+Enter insere linha. Frames com eventos IME não enviam

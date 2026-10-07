@@ -1,0 +1,20 @@
+[package]
+name = "discord-network"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+discord-core = { path = "../discord-core" }
+base64 = "0.22"
+futures-util = { version = "0.3", features = ["sink"] }
+rand = "0.8"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+rsa = { version = "0.9", features = ["sha2"] }
+serde_json = "1"
+sha2 = "0.10"
+tokio = { version = "1", features = ["rt", "time", "sync", "net", "macros"] }
+tokio-tungstenite = { version = "0.26", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
+zeroize = "1"
+

@@ -8,5 +8,8 @@ rust-version.workspace = true
 [dependencies]
 eframe.workspace = true
 app-state = { path = "../app-state" }
+discord-core = { path = "../discord-core" }
+discord-network = { path = "../discord-network" }
+qrcode = { version = "0.14", default-features = false }
 input = { path = "../input" }
 platform = { path = "../platform" }
