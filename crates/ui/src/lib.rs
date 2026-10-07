@@ -1,6 +1,7 @@
 //! Discord-style native desktop frontend. No webview or controller runtime.
 mod composer;
 use app_state::{AppState, ConversationId, Screen};
+use discord_core::{AccountId, Backend, BackendCommand, BackendConnection, MockBackend, Snapshot};
 use eframe::egui::{self, Color32, RichText, Stroke, Vec2};
 use input::{AppAction, Key, Region};
 use platform::Metrics;
@@ -16,18 +17,20 @@ const GREEN: Color32 = Color32::from_rgb(35, 165, 90);
 
 pub struct Rustcord {
     state: AppState,
+    backend: MockBackend,
+    connection: BackendConnection,
     metrics: Metrics,
     started: Instant,
     first_frame: bool,
     draft: String,
-    draft_conversation: Option<ConversationId>,
+    draft_conversation: (app_state::SessionGeneration, Option<ConversationId>),
     composer_input: composer::ComposerInput,
     focus_composer: bool,
     context_anchor: egui::Pos2,
     smoke: bool,
     smoke_step: usize,
     smoke_done: bool,
-    last_conversation: Option<ConversationId>,
+    last_conversation: (app_state::SessionGeneration, Option<ConversationId>),
     last_message_count: usize,
 }
 impl Rustcord {
@@ -55,25 +58,55 @@ impl Rustcord {
             .text_styles
             .insert(egui::TextStyle::Button, egui::FontId::proportional(15.0));
         cc.egui_ctx.set_style_of(egui::Theme::Dark, style);
-        let mut state = AppState::default();
+        let mut state = AppState::new(Snapshot {
+            account: AccountId::new(0),
+            servers: Vec::new(),
+            profile: String::new(),
+        });
         if metrics {
             state.metrics = true;
         }
+        let wake = cc.egui_ctx.clone();
+        let (backend, connection) =
+            MockBackend::connect(state.generation(), move || wake.request_repaint());
+        connection
+            .try_command(BackendCommand::RequestSnapshot)
+            .expect("empty command queue");
         Self {
             state,
+            backend,
+            connection,
             metrics: Metrics::new(started),
             started,
             first_frame: true,
             draft: String::new(),
-            draft_conversation: None,
+            draft_conversation: (app_state::SessionGeneration::INITIAL, None),
             composer_input: composer::ComposerInput::default(),
             focus_composer: false,
             context_anchor: egui::pos2(520.0, 240.0),
             smoke,
             smoke_step: 0,
             smoke_done: false,
-            last_conversation: None,
+            last_conversation: (app_state::SessionGeneration::INITIAL, None),
             last_message_count: 0,
+        }
+    }
+    fn backend_events(&mut self) {
+        self.backend.poll();
+        // Bound work per frame; adapters wake the UI only when they enqueue events.
+        for _ in 0..discord_core::BACKEND_QUEUE_CAPACITY {
+            match self.connection.try_event() {
+                Ok(Some(event)) => {
+                    if self.state.apply_backend_event(event).is_err() {
+                        self.state.notice = "Backend snapshot has duplicate identities".into();
+                    }
+                }
+                Ok(None) => break,
+                Err(_) => {
+                    self.state.notice = "Backend connection closed".into();
+                    break;
+                }
+            }
         }
     }
     fn actions(&mut self, ctx: &egui::Context) {
@@ -315,7 +348,7 @@ impl Rustcord {
                         });
                     });
                 self.composer_panel(ui);
-                let conversation = self.state.conversation();
+                let conversation = (self.state.generation(), self.state.conversation());
                 let scroll_bottom = conversation != self.last_conversation
                     || self.state.messages().len() != self.last_message_count;
                 self.last_conversation = conversation;
@@ -546,6 +579,7 @@ impl Rustcord {
 }
 impl eframe::App for Rustcord {
     fn ui(&mut self, root: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.backend_events();
         let start = Instant::now();
         let ctx = root.ctx().clone();
         self.actions(&ctx);

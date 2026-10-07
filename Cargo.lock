@@ -2334,6 +2334,7 @@ name = "ui"
 version = "0.1.0"
 dependencies = [
  "app-state",
+ "discord-core",
  "eframe",
  "input",
  "platform",

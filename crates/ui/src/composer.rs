@@ -50,10 +50,14 @@ impl ComposerInput {
 }
 impl Rustcord {
     pub(super) fn composer_id(&self) -> egui::Id {
-        egui::Id::new(("composer", self.state.conversation()))
+        egui::Id::new((
+            "composer",
+            self.state.generation(),
+            self.state.conversation(),
+        ))
     }
     pub(super) fn composer_panel(&mut self, root: &mut egui::Ui) {
-        let key = self.state.conversation();
+        let key = (self.state.generation(), self.state.conversation());
         if key != self.draft_conversation {
             self.composer_input = ComposerInput::default();
             self.draft_conversation = key;
@@ -405,6 +409,40 @@ mod tests {
             ],
         );
         assert!(app.state.draft().is_none());
+    }
+    #[test]
+    fn a_new_session_cannot_undo_into_the_previous_sessions_text() {
+        let (mut app, ctx) = native_test_app();
+        let old_editor = app.composer_id();
+        ctx.memory_mut(|m| m.request_focus(old_editor));
+        app_frame(
+            &mut app,
+            &ctx,
+            vec![egui::Event::Text("previous session".into())],
+        );
+        let data = app.state.data.clone();
+        app.state.begin_session().unwrap();
+        app.state.replace_snapshot(data).unwrap();
+        let new_editor = app.composer_id();
+        assert_ne!(new_editor, old_editor);
+        app_frame(&mut app, &ctx, vec![]);
+        ctx.memory_mut(|m| m.request_focus(new_editor));
+        app_frame(
+            &mut app,
+            &ctx,
+            vec![
+                egui::Event::ModifiersChanged(egui::Modifiers::COMMAND),
+                egui::Event::Key {
+                    key: egui::Key::Z,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::COMMAND,
+                },
+            ],
+        );
+        assert!(app.state.draft().is_none());
+        assert!(app.draft.is_empty());
     }
     #[test]
     fn only_plain_non_repeated_enter_sends_from_an_enabled_editor() {

@@ -1,8 +1,8 @@
 //! Pure application reducer, shared by any future frontend.
-pub use discord_core::ConversationId;
 use discord_core::{
-    Backend, BackendEvent, Message, MessageId, MockBackend, Snapshot, SnapshotError,
+    BackendEvent, Message, MessageId, MockBackend, SessionEvent, Snapshot, SnapshotError,
 };
+pub use discord_core::{ConversationId, SessionGeneration};
 use input::{AppAction, Direction, Region};
 use std::collections::HashMap;
 
@@ -28,14 +28,12 @@ pub struct AppState {
     pub metrics: bool,
     pub notice: String,
     next_id: Option<u64>,
+    generation: SessionGeneration,
     drafts: HashMap<ConversationId, ComposerDraft>,
 }
 impl Default for AppState {
     fn default() -> Self {
-        let BackendEvent::Snapshot(data) = MockBackend.initial_event() else {
-            unreachable!()
-        };
-        Self::new(data)
+        Self::new(MockBackend::snapshot())
     }
 }
 impl AppState {
@@ -60,6 +58,7 @@ impl AppState {
             metrics: cfg!(debug_assertions),
             notice: "Local demo · no Discord connection".into(),
             next_id,
+            generation: SessionGeneration::INITIAL,
             drafts: HashMap::new(),
         }
     }
@@ -74,6 +73,37 @@ impl AppState {
             account: self.data.account,
             channel: self.channels().get(self.channel)?.id,
         })
+    }
+    pub fn generation(&self) -> SessionGeneration {
+        self.generation
+    }
+    /// New account/login lifetime, not a transient reconnect of the same session.
+    pub fn begin_session(&mut self) -> Option<SessionGeneration> {
+        let next = self.generation.next()?;
+        self.generation = next;
+        self.data.servers.clear();
+        self.data.profile.clear();
+        self.drafts.clear();
+        self.server = 0;
+        self.channel = 0;
+        self.message = 0;
+        self.region = Region::Servers;
+        self.screen = Screen::Main;
+        self.menu_item = 0;
+        self.next_id = Some(1);
+        self.notice = "Waiting for connection".into();
+        Some(next)
+    }
+    /// Late events must not cross logout or an account switch, even for the same ID.
+    pub fn apply_backend_event(&mut self, event: SessionEvent) -> Result<bool, SnapshotError> {
+        if event.generation != self.generation {
+            return Ok(false);
+        }
+        match event.event {
+            BackendEvent::Snapshot(data) => self.replace_snapshot(data)?,
+            BackendEvent::Unavailable(reason) => self.notice = reason.into(),
+        }
+        Ok(true)
     }
     /// Preserve selection and drafts by identity when navigation/history changes.
     /// Validate first so an ambiguous snapshot cannot discard existing state.
@@ -398,6 +428,39 @@ fn wrapped(index: usize, delta: i32, len: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn stale_session_events_cannot_restore_channels_drafts_or_notices() {
+        let mut s = AppState::default();
+        let old = s.generation();
+        let data = s.data.clone();
+        s.dispatch(AppAction::UpdateDraft("old session draft".into()));
+        let new = s.begin_session().unwrap();
+        assert_ne!(new, old);
+        for event in [
+            BackendEvent::Snapshot(data.clone()),
+            BackendEvent::Unavailable("old failure"),
+        ] {
+            assert!(
+                !s.apply_backend_event(SessionEvent {
+                    generation: old,
+                    event
+                })
+                .unwrap()
+            );
+        }
+        assert!(s.data.servers.is_empty());
+        assert!(s.drafts.is_empty());
+        assert_eq!(s.notice, "Waiting for connection");
+        assert!(
+            s.apply_backend_event(SessionEvent {
+                generation: new,
+                event: BackendEvent::Snapshot(data)
+            })
+            .unwrap()
+        );
+        assert!(s.conversation().is_some());
+        assert!(s.draft().is_none());
+    }
     #[test]
     fn snapshot_reorder_and_channel_move_keep_selection_draft_and_reply() {
         let mut s = AppState::default();

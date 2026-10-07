@@ -8,5 +8,6 @@ rust-version.workspace = true
 [dependencies]
 eframe.workspace = true
 app-state = { path = "../app-state" }
+discord-core = { path = "../discord-core" }
 input = { path = "../input" }
 platform = { path = "../platform" }
