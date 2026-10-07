@@ -34,9 +34,17 @@ sudo apt-get install build-essential pkg-config libgl1 libxkbcommon0
 ```
 
 Select a server and channel with the mouse. Type in the composer and press
-Enter or Send to add a local message. Right-click a message for a local reaction.
+Enter or Send to add a local message; Shift+Enter inserts a new line. Drafts and
+pending replies are kept separately for each channel while the app is open.
+Right-click a message to reply, toggle a local reaction, or copy its full text.
+Replies use the composer and show a reference to the original message. F3 replies
+to the selected message; Escape cancels the reply without deleting its text.
+F2 opens the selected message menu; Up/Down and Enter choose an action.
+The native text editor supports selection, clipboard shortcuts and undo/redo;
+undo history is isolated by channel. Text is limited to 2,000 Unicode characters
+and local history to 200 messages per channel.
 The profile's `...` button opens settings; F1 opens settings and Escape closes.
-Ctrl+PageUp/PageDown changes server; Ctrl+Up/Down changes channel. Settings and
+Ctrl+PageUp/PageDown changes server; Ctrl+Up/Down changes channel. Settings, drafts and
 mock messages reset at exit. Debug metrics are enabled by default; release
 metrics require `--metrics` or enabling them in settings.
 

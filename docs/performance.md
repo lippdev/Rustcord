@@ -37,8 +37,7 @@ que não é uma métrica idêntica ao RSS Linux.
 - Árvore do build padrão sem gilrs/libudev, networking async ou browser.
 
 Windows foi verificado em compilação/type checking; executável MSVC, drivers,
-DPI, startup real e working set exigem máquina Windows. CI está configurada mas
-não foi publicada/executada remotamente nesta sessão.
+DPI, startup real e working set exigem máquina Windows. CI está configurada e publicada; sua execução remota ainda não foi comprovada.
 
 ## Reproduzir
 
@@ -56,3 +55,28 @@ Próximo baseline: Windows/MSVC com GPU real, 10+ amostras cold/warm, histórico
 longo, resize/DPI, seleção de texto, IME e perfil CPU/alocações. Meta provisória
 <20 MiB de binário, <80 MiB working set idle, startup warm <300 ms e CPU idle
 <1% de um core; nenhuma meta Windows está comprovada por estes números Linux.
+
+## Incremento M2 — composer e respostas locais
+
+Mesmo ambiente Linux/Xvfb/Mesa, release, 07/10/2026. Uma amostra warm, obtida por
+`python3 scripts/measure.py`; não é evidência estatística de ganho de performance.
+
+| Métrica | Resultado |
+|---|---:|
+| Binário Linux | 7.595.232 bytes / 7,24 MiB |
+| Startup até primeira atualização de UI | 53,04 ms |
+| RSS idle, métricas desligadas | 82.829.312 bytes / 78,99 MiB |
+| RSS ao final do smoke | 83.308.544 bytes / 79,45 MiB |
+| CPU idle por 3 segundos | 0 ticks registrados |
+| CPU de construção da UI, último frame smoke | 0,221 ms |
+
+20 testes no build padrão e 23 com todas as features; fmt/clippy sem warnings,
+release Linux e check Windows GNU passaram. Eventos nativos XTest verificaram
+Shift+Enter/Enter, rascunho ao trocar canal, menu de clique direito, resposta com
+referência, cópia/colagem via clipboard e F3/Escape. A captura do README mostra
+uma resposta local enviada. Proteção IME é testada por eventos sintéticos;
+IMEs reais e execução Windows ainda precisam de validação.
+
+A CI foi publicada no repositório; não havia execuções remotas registradas antes
+deste incremento. Resultados acima são locais, independentemente do status do
+GitHub Actions.
