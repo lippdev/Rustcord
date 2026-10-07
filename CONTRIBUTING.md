@@ -60,6 +60,9 @@ Windows ou hardware real não puder ser testado. Alterações de documentação
 precisam de revisão e verificação de links; CI precisa de validação do YAML e
 comandos correspondentes. Não é necessário inventar testes para texto ou estilo.
 
-Não há remote configurado nesta sessão. Commits e merges são locais; quando um
-remote for configurado, as mesmas branches podem ser revisadas por pull request.
+O repositório público é [lippdev/rustcord](https://github.com/lippdev/rustcord),
+com remote `origin`. A branch padrão inicial é `develop`, para expor o protótipo;
+`main` permanece reservada às releases. Publicar branches `feature/*` e abrir
+pull requests para `develop`; preservar os commits e integrar com merge commit.
+Releases e hotfixes seguem os destinos definidos acima.
 O executável está disponível em `develop`; instruções no [README](README.md).

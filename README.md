@@ -18,6 +18,9 @@ Visual Studio Build Tools with Desktop development with C++ and Windows SDK.
 Use a working OpenGL graphics driver.
 
 ```sh
+git clone https://github.com/lippdev/rustcord.git
+cd rustcord
+git switch develop
 cargo run -p rustcord
 cargo run -p rustcord --release
 cargo run -p rustcord --release -- --metrics
@@ -72,6 +75,7 @@ progress. No official logos/assets or proprietary fonts are bundled.
 ## Contributing
 
 Use small tested commits on Git Flow branches. See [CONTRIBUTING.md](CONTRIBUTING.md).
-The current development build is on `develop`; `main` is reserved for releases.
+The current development build and repository default branch are `develop`;
+`main` is reserved for releases. Repository: [lippdev/rustcord](https://github.com/lippdev/rustcord).
 
 MIT OR Apache-2.0. Not affiliated with Discord.
