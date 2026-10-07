@@ -1,9 +1,13 @@
 //! Native, read-only Discord connection. Credentials never cross into the UI.
 mod auth;
+mod gateway;
+mod media;
+pub use media::ImageData;
 mod rest;
-use discord_core::{Channel, ChannelId, Message, ServerId, Snapshot};
+use discord_core::{Channel, ChannelId, Member, Message, MessageId, ServerId, Snapshot};
 use std::{sync::Arc, thread};
 use tokio::sync::{mpsc, oneshot};
+use zeroize::Zeroizing;
 
 pub enum Event {
     Qr(String),
@@ -11,12 +15,21 @@ pub enum Event {
     Connected(Snapshot),
     Channels(ServerId, Vec<Channel>),
     History(ChannelId, Vec<Message>),
+    Image(String, Option<ImageData>),
+    Realtime(bool),
+    Members(ServerId, ChannelId, Vec<Member>),
+    Voice(ServerId, Vec<(u64, ChannelId)>),
+    Message(ChannelId, Message),
+    Deleted(ChannelId, Vec<MessageId>),
+    Refresh(ChannelId),
     Error(&'static str),
 }
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub enum Command {
     Channels(ServerId),
     History(ChannelId),
+    Select(ServerId, ChannelId),
+    Image(String),
 }
 /// One handle per login attempt. Drop cancels even while I/O or queues are blocked.
 pub struct Connection {
@@ -104,31 +117,64 @@ async fn session(
         .build()
         .map_err(|_| "Não foi possível iniciar HTTPS.")?;
     let token = auth::login(&http, tx, wake).await?;
+    let gateway_token = Zeroizing::new(token.to_string());
+    let media_http = http.clone();
     let mut api = rest::Api::new(http, token)?;
     let snapshot = api.snapshot().await?;
     publish(tx, wake, Event::Connected(snapshot)).await?;
-    while let Some(command) = commands.recv().await {
-        let result = match command {
-            Command::Channels(id) => api
-                .channels(id)
-                .await
-                .map(|channels| Event::Channels(id, channels)),
-            Command::History(id) => api
-                .history(id)
-                .await
-                .map(|messages| Event::History(id, messages)),
-        };
-        match result {
-            Ok(event) => publish(tx, wake, event).await?,
-            Err(error) => {
-                publish(tx, wake, Event::Error(error)).await?;
-                if error == rest::UNAUTHORIZED {
-                    return Ok(());
+    let (selection_tx, selection_rx) = tokio::sync::watch::channel(None);
+    let gateway = gateway::run(gateway_token, selection_rx, tx.clone(), wake.clone());
+    let (media_tx, mut media_rx) = mpsc::channel::<String>(4);
+    let media_work = async {
+        while let Some(url) = media_rx.recv().await {
+            let image = media::load(&media_http, &url).await;
+            publish(tx, wake, Event::Image(url, image)).await?;
+        }
+        Ok::<(), &'static str>(())
+    };
+    let background = async {
+        let _ = tokio::join!(gateway, media_work);
+    };
+    let reads = async {
+        while let Some(command) = commands.recv().await {
+            let result = match command {
+                Command::Image(url) => {
+                    if let Err(error) = media_tx.try_send(url) {
+                        publish(tx, wake, Event::Image(error.into_inner(), None)).await?;
+                    }
+                    continue;
+                }
+                Command::Select(server, channel) => {
+                    let _ = selection_tx.send(Some((server, channel)));
+                    continue;
+                }
+                Command::Channels(id) => api
+                    .channels(id)
+                    .await
+                    .map(|channels| Event::Channels(id, channels)),
+                Command::History(id) => api
+                    .history(id)
+                    .await
+                    .map(|messages| Event::History(id, messages)),
+            };
+            match result {
+                Ok(event) => publish(tx, wake, event).await?,
+                Err(error) => {
+                    publish(tx, wake, Event::Error(error)).await?;
+                    if error == rest::UNAUTHORIZED {
+                        return Ok(());
+                    }
                 }
             }
         }
+        Ok(())
+    };
+    tokio::pin!(background);
+    tokio::pin!(reads);
+    tokio::select! {
+        result = &mut reads => result,
+        _ = &mut background => reads.await,
     }
-    Ok(())
 }
 
 #[cfg(test)]
