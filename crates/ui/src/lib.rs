@@ -78,6 +78,7 @@ impl Rustcord {
             cc.egui_ctx.set_fonts(fonts);
         }
         let mut state = AppState::new(Snapshot {
+            avatar: Default::default(),
             account: AccountId::new(0),
             servers: Vec::new(),
             profile: String::new(),

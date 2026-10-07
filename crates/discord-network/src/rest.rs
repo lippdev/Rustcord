@@ -1,4 +1,7 @@
-use discord_core::{AccountId, Channel, ChannelId, Message, MessageId, Server, ServerId, Snapshot};
+use discord_core::{
+    AccountId, Attachment, Channel, ChannelDetails, ChannelId, ChannelKind, Embed, Message,
+    MessageDetails, MessageId, Server, ServerId, Snapshot,
+};
 use reqwest::{
     Client, Response, StatusCode,
     header::{AUTHORIZATION, HeaderValue},
@@ -128,6 +131,9 @@ impl Api {
                     .take(2)
                     .collect();
                 servers.push(Server {
+                    icon: cdn_hash(guild, "icon").map(|hash| {
+                        format!("https://cdn.discordapp.com/icons/{server_id}/{hash}.png?size=64")
+                    }),
                     id: ServerId::new(server_id),
                     name,
                     initials,
@@ -153,6 +159,7 @@ impl Api {
             after = next;
         }
         let snapshot = Snapshot {
+            avatar: user_avatar(&user),
             account,
             servers,
             profile,
@@ -177,11 +184,23 @@ fn channels(data: &Value) -> Result<Vec<Channel>, &'static str> {
     let values = data.as_array().filter(|a| a.len() <= 1000).ok_or(INVALID)?;
     let mut channels = Vec::new();
     for value in values {
-        // Text and announcement channels only; forums/threads/voice need separate UX.
-        if !matches!(value["type"].as_u64(), Some(0 | 5)) {
-            continue;
-        }
+        let kind = match value["type"].as_u64() {
+            Some(0 | 5 | 10 | 11 | 12) => ChannelKind::Text,
+            Some(2) => ChannelKind::Voice,
+            Some(4) => ChannelKind::Category,
+            Some(13) => ChannelKind::Stage,
+            Some(15 | 16) => ChannelKind::Forum,
+            _ => continue,
+        };
         let channel = Channel {
+            details: ChannelDetails {
+                kind,
+                parent: value["parent_id"]
+                    .as_str()
+                    .map(|_| id(&value["parent_id"]).map(ChannelId::new))
+                    .transpose()?,
+                position: value["position"].as_i64().unwrap_or(0),
+            },
             id: ChannelId::new(id(&value["id"])?),
             name: text(value, "name", 512)?,
             topic: value["topic"]
@@ -196,28 +215,14 @@ fn channels(data: &Value) -> Result<Vec<Channel>, &'static str> {
         }
         channels.push(channel);
     }
+    channels.sort_by_key(|c| (c.details.position, c.id));
     Ok(channels)
 }
-fn history(data: &Value) -> Result<Vec<Message>, &'static str> {
+pub(crate) fn history(data: &Value) -> Result<Vec<Message>, &'static str> {
     let values = data.as_array().filter(|a| a.len() <= 50).ok_or(INVALID)?;
     let mut messages = Vec::new();
     for value in values {
-        let author = value["author"]["global_name"]
-            .as_str()
-            .filter(|s| s.len() <= 128)
-            .map(str::to_owned)
-            .unwrap_or(text(&value["author"], "username", 128)?);
-        let message = Message {
-            id: MessageId::new(id(&value["id"])?),
-            author,
-            text: text(value, "content", 32 * 1024)?,
-            time: text(value, "timestamp", 64)?,
-            reactions: 0,
-            reply_to: value["message_reference"]["message_id"]
-                .as_str()
-                .map(|_| id(&value["message_reference"]["message_id"]).map(MessageId::new))
-                .transpose()?,
-        };
+        let message = parse_message(value)?;
         if messages.iter().any(|m: &Message| m.id == message.id) {
             return Err(INVALID);
         }
@@ -225,6 +230,107 @@ fn history(data: &Value) -> Result<Vec<Message>, &'static str> {
     }
     messages.sort_by_key(|m| m.id);
     Ok(messages)
+}
+fn optional_text(value: &Value, key: &str, max: usize) -> String {
+    value[key]
+        .as_str()
+        .filter(|s| s.len() <= max)
+        .unwrap_or("")
+        .to_owned()
+}
+fn cdn_hash<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
+    value[key].as_str().filter(|s| {
+        !s.is_empty() && s.len() <= 128 && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+    })
+}
+pub(crate) fn user_avatar(user: &Value) -> Option<String> {
+    let user_id = id(&user["id"]).ok()?;
+    Some(match cdn_hash(user, "avatar") {
+        Some(hash) => format!("https://cdn.discordapp.com/avatars/{user_id}/{hash}.png?size=64"),
+        None => {
+            let index = user["discriminator"]
+                .as_str()
+                .and_then(|s| s.parse::<u64>().ok())
+                .filter(|n| *n > 0)
+                .map_or((user_id >> 22) % 6, |n| n % 5);
+            format!("https://cdn.discordapp.com/embed/avatars/{index}.png")
+        }
+    })
+}
+pub(crate) fn safe_media(value: &Value) -> Option<String> {
+    let raw = value.as_str().filter(|s| s.len() <= 4096)?;
+    let url = reqwest::Url::parse(raw).ok()?;
+    (url.scheme() == "https"
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.port().is_none()
+        && matches!(
+            url.host_str(),
+            Some("cdn.discordapp.com" | "media.discordapp.net")
+        ))
+    .then(|| raw.to_owned())
+}
+pub(crate) fn parse_message(value: &Value) -> Result<Message, &'static str> {
+    let user = &value["author"];
+    let author = value["member"]["nick"]
+        .as_str()
+        .or(user["global_name"].as_str())
+        .or(user["username"].as_str())
+        .filter(|s| s.len() <= 128)
+        .ok_or(INVALID)?
+        .to_owned();
+    let mut attachments = Vec::new();
+    if let Some(items) = value["attachments"].as_array() {
+        for item in items.iter().take(10) {
+            if let Some(url) = safe_media(&item["url"]) {
+                let image = item["content_type"].as_str().is_some_and(|s| {
+                    matches!(s, "image/png" | "image/jpeg" | "image/webp" | "image/gif")
+                });
+                attachments.push(Attachment {
+                    name: optional_text(item, "filename", 512),
+                    url,
+                    image,
+                });
+            }
+        }
+    }
+    let embeds = value["embeds"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .take(10)
+        .map(|item| Embed {
+            title: optional_text(item, "title", 512),
+            description: optional_text(item, "description", 4096),
+            url: item["url"]
+                .as_str()
+                .filter(|s| s.len() <= 4096)
+                .and_then(|s| reqwest::Url::parse(s).ok())
+                .filter(|u| u.scheme() == "https")
+                .map(|u| u.to_string()),
+            image: safe_media(&item["image"]["proxy_url"])
+                .or_else(|| safe_media(&item["image"]["url"]))
+                .or_else(|| safe_media(&item["thumbnail"]["proxy_url"])),
+        })
+        .collect();
+    Ok(Message {
+        id: MessageId::new(id(&value["id"])?),
+        author,
+        text: text(value, "content", 32 * 1024)?,
+        time: text(value, "timestamp", 64)?,
+        reactions: 0,
+        reply_to: value["message_reference"]["message_id"]
+            .as_str()
+            .map(|_| id(&value["message_reference"]["message_id"]).map(MessageId::new))
+            .transpose()?,
+        details: MessageDetails {
+            author_id: id(&user["id"]).unwrap_or(0),
+            avatar: user_avatar(user),
+            attachments,
+            embeds,
+            edited: value["edited_timestamp"].as_str().is_some(),
+        },
+    })
 }
 #[cfg(test)]
 mod tests {
@@ -242,18 +348,49 @@ mod tests {
         assert!(history(&json!([message("0")])).is_err());
     }
     #[test]
-    fn unsupported_channels_are_filtered_and_duplicates_rejected() {
+    fn voice_channels_are_retained_and_duplicates_rejected() {
         assert_eq!(
             channels(
                 &json!([{"id":"1","name":"voice","type":2},{"id":"2","name":"chat","type":0}])
             )
             .unwrap()
             .len(),
-            1
+            2
         );
         assert!(
             channels(&json!([{"id":"1","name":"a","type":0},{"id":"1","name":"b","type":0}]))
                 .is_err()
+        );
+    }
+    #[test]
+    fn message_media_and_author_metadata_survive_parsing() {
+        let parsed = parse_message(&json!({"id":"20","author":{"id":"10","username":"Test","avatar":"abc123"},"member":{"nick":"Nickname"},"content":"","timestamp":"2026-10-07T10:00:00Z","attachments":[{"filename":"photo.png","url":"https://cdn.discordapp.com/attachments/1/2/photo.png?ex=123","content_type":"image/png"}],"embeds":[{"title":"Preview","description":"Description","image":{"proxy_url":"https://media.discordapp.net/test.png"}}]})).unwrap();
+        assert_eq!(parsed.author, "Nickname");
+        assert_eq!(parsed.details.author_id, 10);
+        assert!(parsed.details.avatar.unwrap().contains("/10/abc123.png"));
+        assert_eq!(parsed.details.attachments.len(), 1);
+        assert!(parsed.details.attachments[0].image);
+        assert!(parsed.details.embeds[0].image.is_some());
+    }
+    #[test]
+    fn media_only_accepts_discord_https_hosts_and_preserves_signed_queries() {
+        for url in [
+            "http://cdn.discordapp.com/a.png",
+            "https://cdn.discordapp.com.evil.test/a",
+            "https://evil.test/a",
+            "https://user@cdn.discordapp.com/a",
+            "https://cdn.discordapp.com:444/a",
+        ] {
+            assert!(safe_media(&json!(url)).is_none());
+        }
+        assert_eq!(
+            safe_media(&json!("https://cdn.discordapp.com/a?ex=1&hm=2")).unwrap(),
+            "https://cdn.discordapp.com/a?ex=1&hm=2"
+        );
+        assert!(
+            user_avatar(&json!({"id":"10","avatar":"../../evil"}))
+                .unwrap()
+                .contains("/embed/avatars/")
         );
     }
     async fn mock_request(

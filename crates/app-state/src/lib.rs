@@ -246,6 +246,7 @@ impl AppState {
             return;
         };
         c.messages.push(Message {
+            details: Default::default(),
             id: MessageId::new(id),
             author: "You".into(),
             text: text.chars().take(2000).collect(),
@@ -618,6 +619,7 @@ mod tests {
         s.dispatch(AppAction::UpdateDraft("漢".repeat(2100)));
         assert_eq!(s.draft().unwrap().text.chars().count(), 2000);
         let mut empty = AppState::new(Snapshot {
+            avatar: Default::default(),
             account: discord_core::AccountId::new(1),
             servers: vec![],
             profile: "Test".into(),
@@ -682,6 +684,7 @@ mod tests {
     #[test]
     fn empty_snapshot_and_long_sequences_are_safe() {
         let mut s = AppState::new(Snapshot {
+            avatar: Default::default(),
             account: discord_core::AccountId::new(1),
             servers: vec![],
             profile: "Test".into(),

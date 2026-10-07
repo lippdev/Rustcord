@@ -175,13 +175,16 @@ mod tests {
             server: Some(ServerId::new(1)),
             channel: Some(ChannelId::new(2)),
             snapshot: Some(Snapshot {
+                avatar: Default::default(),
                 account: AccountId::new(1),
                 profile: "Test".into(),
                 servers: vec![Server {
+                    icon: Default::default(),
                     id: ServerId::new(1),
                     name: "Test".into(),
                     initials: "T".into(),
                     channels: vec![Channel {
+                        details: Default::default(),
                         id: ChannelId::new(2),
                         name: "chat".into(),
                         topic: String::new(),
@@ -196,6 +199,7 @@ mod tests {
             Event::History(
                 ChannelId::new(99),
                 vec![Message {
+                    details: Default::default(),
                     id: MessageId::new(1),
                     author: "Other".into(),
                     text: "Wrong channel".into(),

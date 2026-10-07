@@ -7,8 +7,53 @@ pub use backend::{
 };
 pub use ids::{AccountId, ChannelId, ConversationId, MessageId, ServerId};
 use std::collections::HashSet;
+#[derive(Clone, Debug, Default)]
+pub struct MessageDetails {
+    pub author_id: u64,
+    pub avatar: Option<String>,
+    pub attachments: Vec<Attachment>,
+    pub embeds: Vec<Embed>,
+    pub edited: bool,
+}
+#[derive(Clone, Debug)]
+pub struct Attachment {
+    pub name: String,
+    pub url: String,
+    pub image: bool,
+}
+#[derive(Clone, Debug)]
+pub struct Embed {
+    pub title: String,
+    pub description: String,
+    pub url: Option<String>,
+    pub image: Option<String>,
+}
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ChannelKind {
+    #[default]
+    Text,
+    Voice,
+    Category,
+    Stage,
+    Forum,
+}
+#[derive(Clone, Debug, Default)]
+pub struct ChannelDetails {
+    pub kind: ChannelKind,
+    pub parent: Option<ChannelId>,
+    pub position: i64,
+}
+#[derive(Clone, Debug)]
+pub struct Member {
+    pub id: u64,
+    pub name: String,
+    pub avatar: Option<String>,
+    pub status: String,
+}
+
 #[derive(Clone, Debug)]
 pub struct Message {
+    pub details: MessageDetails,
     pub id: MessageId,
     pub author: String,
     pub text: String,
@@ -19,6 +64,7 @@ pub struct Message {
 }
 #[derive(Clone, Debug)]
 pub struct Channel {
+    pub details: ChannelDetails,
     pub id: ChannelId,
     pub name: String,
     pub topic: String,
@@ -26,6 +72,7 @@ pub struct Channel {
 }
 #[derive(Clone, Debug)]
 pub struct Server {
+    pub icon: Option<String>,
     pub id: ServerId,
     pub name: String,
     pub initials: String,
@@ -33,6 +80,7 @@ pub struct Server {
 }
 #[derive(Clone, Debug)]
 pub struct Snapshot {
+    pub avatar: Option<String>,
     pub account: AccountId,
     pub servers: Vec<Server>,
     pub profile: String,
@@ -122,11 +170,13 @@ impl MockBackend {
     pub fn snapshot() -> Snapshot {
         let servers = ["Rust Community", "Rust Collective", "Friends", "Open Source"]
             .iter().enumerate().map(|(si, name)| Server {
+icon: Default::default(),
                 id: ServerId::new(si as u64 + 1),
                 name: (*name).into(),
                 initials: ["RS", "RC", "FR", "OS"][si].into(),
                 channels: ["lounge", "looking-for-group", "projects", "off-topic"]
                     .iter().enumerate().map(|(ci, channel)| Channel {
+details: Default::default(),
                         id: ChannelId::new((si * 100 + ci + 1) as u64),
                         name: (*channel).into(),
                         topic: "A little space to connect. Pick a message and join in.".into(),
@@ -138,6 +188,7 @@ impl MockBackend {
                             ("Maya", "Select a server, open a channel, and type a message below. This prototype uses local mock data."),
                             ("Theo", "Next step: validate text selection, scrolling, and large message histories."),
                         ].iter().enumerate().map(|(mi, (author, text))| Message {
+details: Default::default(),
                             id: MessageId::new((si * 1000 + ci * 100 + mi) as u64),
                             author: (*author).into(), text: (*text).into(),
                             time: format!("20:{:02}", 12 + mi * 3), reactions: 0, reply_to: None,
@@ -145,6 +196,7 @@ impl MockBackend {
                     }).collect(),
             }).collect();
         Snapshot {
+            avatar: Default::default(),
             account: AccountId::new(1),
             servers,
             profile: "Player One".into(),
