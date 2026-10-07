@@ -73,6 +73,20 @@ exigem validação pelo dono da conta. Windows/GPU/DPI também seguem pendentes.
 Economia de RAM é objetivo, ainda sem benchmark equivalente com Discord online.
 
 Verificação gráfica em macOS: painel de login e geração de QR real confirmados
-na janela do build release. O handshake real chegou à apresentação do QR;
-aprovação no celular e leituras autenticadas ainda aguardam o dono da conta.
+na janela do build release. O dono da conta confirmou o QR no celular; perfil, servidores, canais e mensagens
+reais foram observados na janela. Não houve envio nem comparação sistemática com
+o cliente oficial.
 Workspace: 45 testes passaram, fmt/clippy estrito e build release passaram.
+
+## Layout conectado
+
+A tela de leitura usa a mesma linguagem visual da demonstração: rail de servidores
+72 px, sidebar de canais 240 px, perfil no rodapé e conversa com header, avatar por
+inicial, autor, timestamp compacto e corpo selecionável. Listas de servidores e
+canais são virtualizadas; nomes compridos são truncados com tooltip. URLs/textos
+longos quebram dentro da conversa. Sem dados de membros/avatares CDN, não exibimos
+membros fictícios. O rodapé identifica envio ainda indisponível.
+
+O layout foi inspecionado por render de meshes/font atlas egui com dados sintéticos,
+sem abrir janela ou controlar o desktop. A sessão do usuário foi preservada na
+versão anterior; validação interativa do novo layout/Windows continua pendente.

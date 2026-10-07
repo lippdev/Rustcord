@@ -13,7 +13,7 @@ API descritas abaixo permanecem relevantes, mas aprovação oficial não é uma
 dependência técnica de compilação/conexão. Interoperabilidade e autorização
 contratual são questões distintas. A discovery não implementou autenticação.
 O incremento seguinte adiciona [QR nativo e leituras HTTPS](native-connection.md),
-com confirmação de conta real ainda pendente. A demonstração mock segue disponível.
+com aprovação QR e leituras reais observadas no macOS. A demonstração mock segue disponível.
 
 ## Pesquisa e limite de produto (07/10/2026)
 

@@ -12,7 +12,7 @@ Start with **Entrar com QR**, scan using the Discord mobile app, and confirm the
 Select a server and text channel to fetch the latest 50 messages; **Atualizar**
 reloads them. Session credentials stay inside the network worker in memory, with
 no password/token entry or saved login. This is an independent alternative client,
-not an officially approved integration. Live account validation is still pending.
+not an officially approved integration. QR approval and authenticated reads were observed on macOS; Windows validation is pending.
 
 Sending, live chat updates, DMs, attachments and voice are not implemented online.
 **Abrir demonstração local** opens the earlier mock/composer prototype; its sends

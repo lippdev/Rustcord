@@ -13,7 +13,7 @@ primeiro um Discord nativo em Rust, com design e usabilidade familiares.
 3. **Discovery do backend nativo**: [concluída](native-backend-discovery.md).
    Objetivo confirmado: conta pessoal e ausência de WebView. Serein é candidato
    a reaproveitamento seletivo; [spike QR nativo implementado](native-connection.md),
-   ainda aguardando validação com conta real. OAuth2
+   com aprovação QR e leituras reais observadas no macOS. OAuth2
    comum não libera um substituto completo, e interoperabilidade não é aprovação.
 4. **Backend alternativo nativo**: começar com IDs estáveis e comandos/eventos
    assíncronos; depois REST/rate-limit, Gateway/reconnect/Resume, cache limitado,
@@ -53,6 +53,6 @@ com ACK, expiração/cancelamento e sessão em memória. Leitura de perfil/servi
 canais de texto e últimas 50 mensagens, com atualização manual, limites de payload
 e tratamento de 401/403/429. Testes locais não comprovam login live.
 
-Próximo passo: validar QR e leituras com o dono da conta; depois envio explícito e
+QR e leituras reais foram observados com o dono da conta. Próximo passo: envio explícito e
 Gateway com heartbeat, reconexão/Resume e eventos create/update/delete. Não há
 medição comparativa que demonstre economia de RAM em uma sessão equivalente.

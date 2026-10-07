@@ -1,8 +1,8 @@
 //! Native login/read-only view. The local composer is never mounted for a real session.
-use super::{CHAT, MUTED, RAIL, SIDEBAR, TEXT};
 use discord_core::{ChannelId, ServerId, Snapshot};
 use discord_network::{Command, Connection, Event};
-use eframe::egui::{self, Color32, RichText};
+use eframe::egui::{self, Color32};
+mod connected;
 
 #[derive(Default)]
 pub(super) struct OnlineView {
@@ -145,129 +145,8 @@ impl OnlineView {
             }
             return false;
         }
-        egui::Panel::top("connection-status")
-            .frame(egui::Frame::new().fill(RAIL).inner_margin(12))
-            .show(root, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("Rustcord").strong());
-                    if let Some(snapshot) = &self.snapshot {
-                        ui.label(&snapshot.profile);
-                    }
-                    ui.label(RichText::new(self.status).color(MUTED));
-                    if ui.button("Sair").clicked() {
-                        *self = Self::default();
-                    }
-                });
-            });
-        if self.snapshot.is_none() {
-            return false;
-        }
-        let mut selected_server = None;
-        egui::Panel::left("live-servers")
-            .exact_size(200.0)
-            .resizable(false)
-            .frame(egui::Frame::new().fill(RAIL).inner_margin(10))
-            .show(root, |ui| {
-                ui.label(RichText::new("SERVIDORES").strong().color(MUTED));
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    ui.add_enabled_ui(!self.busy, |ui| {
-                        for server in &self.snapshot.as_ref().unwrap().servers {
-                            if ui
-                                .selectable_label(self.server == Some(server.id), &server.name)
-                                .clicked()
-                            {
-                                selected_server = Some(server.id);
-                            }
-                        }
-                    });
-                });
-            });
-        if let Some(server) = selected_server {
-            self.server = Some(server);
-            self.channel = None;
-            for item in &mut self.snapshot.as_mut().unwrap().servers {
-                item.channels.clear();
-            }
-            self.request(Command::Channels(server));
-        }
-        let mut selected_channel = None;
-        egui::Panel::left("live-channels")
-            .exact_size(220.0)
-            .resizable(false)
-            .frame(egui::Frame::new().fill(SIDEBAR).inner_margin(10))
-            .show(root, |ui| {
-                ui.label(RichText::new("CANAIS DE TEXTO").strong().color(MUTED));
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    ui.add_enabled_ui(!self.busy, |ui| {
-                        if let Some(server) = self
-                            .snapshot
-                            .as_ref()
-                            .unwrap()
-                            .servers
-                            .iter()
-                            .find(|s| Some(s.id) == self.server)
-                        {
-                            for channel in &server.channels {
-                                if ui
-                                    .selectable_label(
-                                        self.channel == Some(channel.id),
-                                        format!("# {}", channel.name),
-                                    )
-                                    .clicked()
-                                {
-                                    selected_channel = Some(channel.id);
-                                }
-                            }
-                        }
-                    });
-                });
-            });
-        if let Some(channel) = selected_channel {
-            self.channel = Some(channel);
-            for channel in self
-                .snapshot
-                .as_mut()
-                .unwrap()
-                .servers
-                .iter_mut()
-                .flat_map(|s| &mut s.channels)
-            {
-                channel.messages.clear();
-            }
-            self.request(Command::History(channel));
-        }
-        egui::CentralPanel::default().frame(egui::Frame::new().fill(CHAT).inner_margin(16)).show(root, |ui| {
-            let channel = self.snapshot.as_ref().unwrap().servers.iter().flat_map(|s| &s.channels).find(|c| Some(c.id) == self.channel);
-            let mut refresh = false;
-            if let Some(channel) = channel {
-                ui.horizontal(|ui| {
-                    ui.heading(format!("# {}",channel.name));
-                    refresh = ui.add_enabled(!self.busy,egui::Button::new("Atualizar")).clicked();
-                });
-                if !channel.topic.is_empty() { ui.label(RichText::new(&channel.topic).color(MUTED)); }
-                ui.separator();
-                egui::Panel::bottom("live-read-only").show(ui, |ui| {
-                    ui.label(RichText::new("Leitura de até 50 mensagens • envio e atualizações em tempo real ainda em desenvolvimento").color(MUTED));
-                });
-                egui::ScrollArea::vertical().id_salt(("live-history",self.channel)).stick_to_bottom(true).show(ui, |ui| {
-                    if channel.messages.is_empty() && !self.busy { ui.label("Nenhuma mensagem carregada."); }
-                    for message in &channel.messages {
-                        ui.add_space(12.0);
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new(&message.author).strong().color(TEXT));
-                            ui.label(RichText::new(&message.time).small().color(MUTED));
-                        });
-                        if !message.text.is_empty() { ui.label(&message.text); }
-                        else { ui.label(RichText::new("Mensagem sem texto; anexos ainda não são exibidos.").color(MUTED)); }
-                    }
-                });
-            } else {
-                ui.heading("Bem-vindo ao Rustcord");
-                ui.label("Selecione um servidor e um canal para carregar mensagens reais.");
-            }
-            if refresh && let Some(channel) = self.channel { self.request(Command::History(channel)); }
-            if self.busy { ui.spinner(); }
-        });
+        self.connected_ui(root);
+
         false
     }
 }
