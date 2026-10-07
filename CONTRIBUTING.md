@@ -60,7 +60,7 @@ Windows ou hardware real não puder ser testado. Alterações de documentação
 precisam de revisão e verificação de links; CI precisa de validação do YAML e
 comandos correspondentes. Não é necessário inventar testes para texto ou estilo.
 
-O repositório público é [lippdev/rustcord](https://github.com/lippdev/rustcord),
+O repositório público é [lippdev/Rustcord](https://github.com/lippdev/Rustcord),
 com remote `origin`. A branch padrão inicial é `develop`, para expor o protótipo;
 `main` permanece reservada às releases. Publicar branches `feature/*` e abrir
 pull requests para `develop`; preservar os commits e integrar com merge commit.
