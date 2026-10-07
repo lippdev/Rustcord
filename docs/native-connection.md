@@ -90,3 +90,10 @@ membros fictícios. O rodapé identifica envio ainda indisponível.
 O layout foi inspecionado por render de meshes/font atlas egui com dados sintéticos,
 sem abrir janela ou controlar o desktop. A sessão do usuário foi preservada na
 versão anterior; validação interativa do novo layout/Windows continua pendente.
+
+Símbolos: fallback opcional Apple Symbols (macOS), Segoe UI Symbol (Windows),
+Noto Sans Symbols2/DejaVu Sans (Linux), lendo um único arquivo do sistema de até
+4 MiB. Fontes do sistema não são redistribuídas e a cobertura depende do SO; isso
+não implementa emoji colorido nem cobertura universal de idiomas. Formas verticais
+de apresentação Unicode nos nomes são mostradas como barras compatíveis,
+preservando os nomes originais no domínio e os IDs das conversas.

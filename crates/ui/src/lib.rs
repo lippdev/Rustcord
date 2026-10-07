@@ -62,6 +62,21 @@ impl Rustcord {
             .text_styles
             .insert(egui::TextStyle::Button, egui::FontId::proportional(15.0));
         cc.egui_ctx.set_style_of(egui::Theme::Dark, style);
+        if let Some(bytes) = platform::system_symbol_font() {
+            let mut fonts = egui::FontDefinitions::default();
+            fonts.font_data.insert(
+                "system-symbols".into(),
+                std::sync::Arc::new(egui::FontData::from_owned(bytes)),
+            );
+            for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
+                fonts
+                    .families
+                    .entry(family)
+                    .or_default()
+                    .push("system-symbols".into());
+            }
+            cc.egui_ctx.set_fonts(fonts);
+        }
         let mut state = AppState::new(Snapshot {
             account: AccountId::new(0),
             servers: Vec::new(),

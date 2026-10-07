@@ -4,6 +4,7 @@ use crate::{BLURPLE, CHAT, MUTED, RAIL, SELECTED, SIDEBAR, TEXT, author_color, a
 use discord_core::{ChannelId, ServerId};
 use discord_network::Command;
 use eframe::egui::{self, RichText, Stroke, Vec2};
+use std::borrow::Cow;
 
 impl OnlineView {
     pub(super) fn connected_ui(&mut self, root: &mut egui::Ui) {
@@ -157,7 +158,10 @@ impl OnlineView {
                             .and_then(|s| s.servers.iter().find(|s| Some(s.id) == self.server))
                             .map_or("Seus servidores", |s| s.name.as_str());
                         ui.add(
-                            egui::Label::new(RichText::new(name).size(16.0).strong()).truncate(),
+                            egui::Label::new(
+                                RichText::new(presentation_name(name)).size(16.0).strong(),
+                            )
+                            .truncate(),
                         )
                         .on_hover_text(name);
                     });
@@ -181,10 +185,12 @@ impl OnlineView {
                                 for index in rows {
                                     let channel = &server.channels[index];
                                     let active = self.channel == Some(channel.id);
-                                    let label =
-                                        egui::RichText::new(format!("#   {}", channel.name))
-                                            .size(15.0)
-                                            .color(if active { TEXT } else { MUTED });
+                                    let label = egui::RichText::new(format!(
+                                        "#   {}",
+                                        presentation_name(&channel.name)
+                                    ))
+                                    .size(15.0)
+                                    .color(if active { TEXT } else { MUTED });
                                     let button = egui::Button::new("")
                                         .left_text(label)
                                         .wrap_mode(egui::TextWrapMode::Truncate)
@@ -234,7 +240,7 @@ impl OnlineView {
                             refresh = ui.add_enabled(channel.is_some() && !self.busy,egui::Button::new("Atualizar")).clicked();
                             if let Some(channel) = channel {
                                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                                    ui.add(egui::Label::new(RichText::new(&channel.name).size(16.0).strong()).truncate()).on_hover_text(&channel.name);
+                                    ui.add(egui::Label::new(RichText::new(presentation_name(&channel.name)).size(16.0).strong()).truncate()).on_hover_text(&channel.name);
                                     if !channel.topic.is_empty() {
                                         ui.separator();
                                         ui.add(egui::Label::new(RichText::new(&channel.topic).size(12.0).color(MUTED)).truncate()).on_hover_text(&channel.topic);
@@ -312,5 +318,20 @@ fn display_time(timestamp: &str) -> String {
         format!("{} · {}{zone}", &timestamp[..10], &timestamp[11..16])
     } else {
         timestamp.to_owned()
+    }
+}
+
+// Common decorative CJK vertical bars have no glyph in the minimal font set.
+// Normalize their presentation only; domain names and IDs remain untouched.
+fn presentation_name(name: &str) -> Cow<'_, str> {
+    let decorative = |c| matches!(c, '\u{fe31}' | '\u{fe32}' | '\u{ff5c}');
+    if name.chars().any(decorative) {
+        Cow::Owned(
+            name.chars()
+                .map(|c| if decorative(c) { '│' } else { c })
+                .collect(),
+        )
+    } else {
+        Cow::Borrowed(name)
     }
 }
