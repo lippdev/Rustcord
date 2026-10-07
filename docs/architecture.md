@@ -11,16 +11,19 @@ licenças, login e um experimento de extração do backend Serein. Essa direçã
 substitui a proposta de converter o produto em companion/bot. As restrições de
 API descritas abaixo permanecem relevantes, mas aprovação oficial não é uma
 dependência técnica de compilação/conexão. Interoperabilidade e autorização
-contratual são questões distintas. O app atual permanece mock; a discovery não
-implementou autenticação nem confirmou funcionamento com conta real.
+contratual são questões distintas. A discovery não implementou autenticação.
+O incremento seguinte adiciona [QR nativo e leituras HTTPS](native-connection.md),
+com confirmação de conta real ainda pendente. A demonstração mock segue disponível.
 
 ## Pesquisa e limite de produto (07/10/2026)
 
 A API oficial não oferece autorização geral para substituir o cliente de uma
 conta pessoal. [Self-bots](https://support.discord.com/hc/en-us/articles/115002192352-Automated-User-Accounts-Self-Bots)
-são expressamente proibidos e podem causar encerramento da conta. Não coletar
-senhas/tokens pessoais, reproduzir endpoints privados, impersonar o cliente,
-extrair tokens do browser nem contornar CAPTCHA ou restrições.
+são expressamente proibidos e podem causar encerramento da conta. O usuário
+escolheu interoperabilidade de um cliente nativo independente; isso não implica
+aprovação oficial. O login QR usa Remote Auth v2, um protocolo não OAuth público.
+Não pedir senha/token manual, extrair sessões de outros aplicativos, impersonar
+um navegador ou contornar MFA/CAPTCHA.
 
 [OAuth2](https://docs.discord.com/developers/topics/oauth2) permite apenas os
 scopes autorizados: identify/guilds não equivalem a ler/enviar todas as mensagens
@@ -30,16 +33,16 @@ de independência. Social SDK tem comunicação com acesso limitado e termos
 próprios; não assumir que autoriza um cliente geral de guilds/DMs.
 Bots são identidades próprias, com permissões/intents, não substitutos da conta
 pessoal. [Developer Policy](https://docs.discord.com/developers/policies/developer-policy)
-exige respeito a privacidade, autorização e limites. Uma integração real exige
-revisão do caso de uso e escopo oficialmente disponível/aprovado. O roadmap pode
-precisar virar um companion para bots/SDK, se não houver autorização apropriada.
+exige respeito a privacidade, autorização e limites. O projeto permanece um
+cliente alternativo de conta pessoal, conforme a direção confirmada pelo usuário.
+As capacidades e limitações são documentadas sem presumir suporte oficial.
 
 Fontes consultadas: artigo oficial acima e arquivos atuais do repositório oficial
 [discord-api-docs](https://github.com/discord/discord-api-docs/tree/main/developers)
 (`topics/oauth2.mdx`, `policies/developer-policy.mdx`,
 `discord-social-sdk/core-concepts/oauth2-scopes.mdx`). As páginas web de docs
 retornaram HTTP 403 aqui; os respectivos fontes oficiais foram acessíveis.
-A Developer Policy completa foi consultada também no [suporte oficial](https://support-dev.discord.com/hc/en-us/articles/8563934450327-Discord-Developer-Policy); o arquivo do repositório aponta para essa página. Não há autenticação, HTTP, WebSocket ou segredos neste milestone.
+A Developer Policy completa foi consultada também no [suporte oficial](https://support-dev.discord.com/hc/en-us/articles/8563934450327-Discord-Developer-Policy); o arquivo do repositório aponta para essa página. O milestone inicial era inteiramente mock; a conexão experimental é descrita abaixo.
 
 ## Comparação de UI
 
@@ -78,7 +81,9 @@ app -> composição, janela, lifecycle
 ```
 
 - `discord-core`: modelos de domínio, trait `Backend`, capabilities e mock.
-  Não importa UI/input. Futuro REST/Gateway é um adaptador atrás da trait.
+  Não importa UI/input.
+- `discord-network`: QR/Remote Auth v2, worker Tokio e leituras HTTPS com
+  reqwest/rustls. Não importa UI/input; reutiliza os modelos do domínio.
 - `app-state`: seleção, foco por região/item, telas e reducer puro.
 - `input`: ações sem domínio Discord e mapeamento de teclado. Deadzone,
   histerese e worker de gamepad ficam em módulo opcional fora do app padrão.
@@ -116,16 +121,22 @@ incluem a geração, impedindo undo de texto de uma sessão anterior.
 
 O app solicita o snapshot inicial por esse transporte e o mock o entrega antes
 das ações de UI no primeiro frame. `RequestSnapshot` é o único comando de backend
-neste incremento; mensagens e reações continuam no reducer local. Requisitar
-outro snapshot mock repõe seus dados de demonstração. Não há HTTP, WebSocket,
-login, cofre, runtime async ou código Serein incorporado nesta fundação.
+na demonstração local; mensagens e reações continuam no reducer local. Requisitar
+outro snapshot mock repõe seus dados de demonstração. O modo conectado usa o
+worker independente de `discord-network`; veja [o fluxo e os limites](native-connection.md).
+Não há cofre ou código Serein incorporado.
 
 Evitar a dependência cíclica UI/input: as duas produzem comandos, estado é a
 fonte de verdade. Backend futuro deve emitir eventos em fila limitada com
 cancelamento/backpressure; UI não espera rede. Cache de mensagens limitado e
-paginação/virtualização necessários antes de dados reais. Tokio + reqwest
-(rustls, features mínimas) e tokio-tungstenite são opções maduras para o futuro,
-mas não entram no lockfile como networking da aplicação agora.
+paginação/virtualização necessários para expandir o histórico. O modo conectado
+limita a leitura a 50 mensagens do canal atual; usa Tokio, reqwest/rustls e
+tokio-tungstenite. Possui filas de oito slots e cancelamento da tarefa inteira,
+inclusive com I/O pendente ou fila cheia. Cada tentativa possui seu próprio
+receiver; sair/cancelar descarta a tentativa e todos os seus eventos.
+A tela de leitura mantém seleção por IDs em `OnlineView`, separada do reducer
+de edição local, para não simular envio/reação em canais reais. Unificar a
+coordenação de sessão no reducer será necessário ao implementar envio/Gateway.
 
 Pesquisa para etapa futura, desativada no app atual: **gilrs 0.11.2**, mapeamentos padronizados, hotplug, Windows Gaming Input (WGI) padrão no Windows,
 udev no Linux. SDL3 é alternativa abrangente mas acrescenta runtime/build C;
@@ -157,7 +168,8 @@ não resolvem autenticação de contas pessoais nem fornecem a UI oficial.
 
 Mouse seleciona servidores/canais e permite scroll; editor permite digitar e enviar
 com Enter. Clique direito abre ações locais de mensagem. F1 abre configuração,
-Escape fecha, atalhos de seleção ficam na camada de actions. Tudo é mock.
+Escape fecha, atalhos de seleção ficam na camada de actions. Essas interações
+pertencem à demonstração mock; a conexão inicial oferece apenas leitura.
 Gamepad permanece apenas como módulo experimental opcional (`input/gamepad`),
 fora do build e runtime padrão. Não há worker de gamepad ou dependência gilrs no
 aplicativo padrão. Integração com controles/Console Mode deve ser reconsiderada

@@ -264,8 +264,27 @@ mod tests {
         let ctx = egui::Context::default();
         let cc = eframe::CreationContext::_new_kittest(ctx.clone());
         let mut app = Rustcord::new(&cc, std::time::Instant::now(), false, false);
+        app.demo = true;
         app_frame(&mut app, &ctx, vec![]);
         (app, ctx)
+    }
+    #[test]
+    fn login_screen_does_not_mount_the_mock_composer_or_process_send_keys() {
+        let ctx = egui::Context::default();
+        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let mut app = Rustcord::new(&cc, std::time::Instant::now(), false, false);
+        app_frame(
+            &mut app,
+            &ctx,
+            vec![
+                egui::Event::Text("must not send".into()),
+                enter(egui::Modifiers::NONE, false),
+            ],
+        );
+        assert!(!app.demo);
+        assert!(app.state.messages().is_empty());
+        assert!(app.state.draft().is_none());
+        assert!(!ctx.memory(|m| m.has_focus(app.composer_id())));
     }
     #[test]
     fn keyboard_reply_focuses_editor_and_escape_preserves_written_draft() {

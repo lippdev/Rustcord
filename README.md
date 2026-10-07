@@ -7,11 +7,18 @@ profile and message composer.
 
 ![Current native mock UI](docs/preview.png)
 
-**Current build uses local mock data.** There is no Discord login or connection.
-The official API does not generally authorize replacement clients for personal
-accounts; see [architecture](docs/architecture.md) for researched restrictions.
-The native personal-account backend discovery and proposed next steps are in
-[native backend discovery](docs/native-backend-discovery.md).
+**Experimental native QR login and read-only Discord access are implemented.**
+Start with **Entrar com QR**, scan using the Discord mobile app, and confirm there.
+Select a server and text channel to fetch the latest 50 messages; **Atualizar**
+reloads them. Session credentials stay inside the network worker in memory, with
+no password/token entry or saved login. This is an independent alternative client,
+not an officially approved integration. Live account validation is still pending.
+
+Sending, live chat updates, DMs, attachments and voice are not implemented online.
+**Abrir demonstração local** opens the earlier mock/composer prototype; its sends
+and reactions never reach Discord. The screenshot above shows that local demo.
+See [native connection](docs/native-connection.md) for implementation and validation,
+and [backend discovery](docs/native-backend-discovery.md) for the research.
 
 ## Run
 
@@ -35,7 +42,7 @@ gamepad feature, an OpenGL runtime, libxkbcommon, and an X11/Wayland display.
 sudo apt-get install build-essential pkg-config libgl1 libxkbcommon0
 ```
 
-Select a server and channel with the mouse. Type in the composer and press
+In the **local demonstration**, select a server and channel with the mouse. Type in the composer and press
 Enter or Send to add a local message; Shift+Enter inserts a new line. Drafts and
 pending replies are kept separately for each channel while the app is open.
 Right-click a message to reply, toggle a local reaction, or copy its full text.
@@ -47,7 +54,7 @@ undo history is isolated by channel. Text is limited to 2,000 Unicode characters
 and local history to 200 messages per channel.
 The profile's `...` button opens settings; F1 opens settings and Escape closes.
 Ctrl+PageUp/PageDown changes server; Ctrl+Up/Down changes channel. Settings, drafts and
-mock messages reset at exit. Debug metrics are enabled by default; release
+mock messages reset at exit. In the local demo, debug metrics are enabled by default; release
 metrics require `--metrics` or enabling them in settings.
 
 The controller/TV experience from the first prototype was removed from the
@@ -71,7 +78,8 @@ CI is configured for Windows and Linux. Physical Windows validation is pending.
 ## Structure
 
 `app` composes the native window; `discord-core` owns models/mock/backend boundary;
-`app-state` owns state/actions; `input` maps input independently of Discord;
+`discord-network` owns QR authentication and bounded HTTPS reads;
+`app-state` owns local demo state/actions; `input` maps input independently of Discord;
 `ui` renders the desktop layout; `platform` samples process metrics.
 
 [Architecture](docs/architecture.md) · [Roadmap](docs/roadmap.md) ·

@@ -12,12 +12,14 @@ primeiro um Discord nativo em Rust, com design e usabilidade familiares.
    menus e acessibilidade. Validar Windows/DPI e medir startup/working set/CPU.
 3. **Discovery do backend nativo**: [concluída](native-backend-discovery.md).
    Objetivo confirmado: conta pessoal e ausência de WebView. Serein é candidato
-   a reaproveitamento seletivo; login QR sem WebView ainda exige spike. OAuth2
+   a reaproveitamento seletivo; [spike QR nativo implementado](native-connection.md),
+   ainda aguardando validação com conta real. OAuth2
    comum não libera um substituto completo, e interoperabilidade não é aprovação.
 4. **Backend alternativo nativo**: começar com IDs estáveis e comandos/eventos
    assíncronos; depois REST/rate-limit, Gateway/reconnect/Resume, cache limitado,
    autenticação nativa e cofre do sistema. Validar primeiro com transportes locais
-   e depois com uma sessão controlada pelo dono da conta.
+   e depois com uma sessão controlada pelo dono da conta. IDs/filas e login QR
+   com leituras HTTPS estão implementados; Gateway e cofre seguem pendentes.
 5. **Chat conectado**: servidores/canais/DMs e mensagens primeiro; depois
    attachments, reactions, notificações, busca e deep links, conforme capacidades
    efetivamente implementadas e verificadas.
@@ -38,8 +40,19 @@ isolados, proteção de envio durante composição IME/repeat, menu contextual
 (mouse/F2), cópia de texto, resposta editável com referência e cancelamento por
 Escape. Tudo permanece local/mock, sem dependências novas.
 
-Próximo incremento recomendado: agrupamento de mensagens por autor/horário e
+Para o modo local, próximo incremento: agrupamento de mensagens por autor/horário e
 histórico virtualizado, preservando scroll ao receber mensagens/alterar canal.
 Validar longos históricos, seleção/cópia e resize; testar Windows/MSVC com GPU,
 DPI e IMEs reais antes de release. A fidelidade visual ainda exige refinamento de
 ícones/tipografia e comparação com uma referência desktop específica do Discord.
+
+## Progresso da conexão nativa
+
+Implementados: login QR sem WebView, confirmação no celular, nonce RSA, heartbeat
+com ACK, expiração/cancelamento e sessão em memória. Leitura de perfil/servidores,
+canais de texto e últimas 50 mensagens, com atualização manual, limites de payload
+e tratamento de 401/403/429. Testes locais não comprovam login live.
+
+Próximo passo: validar QR e leituras com o dono da conta; depois envio explícito e
+Gateway com heartbeat, reconexão/Resume e eventos create/update/delete. Não há
+medição comparativa que demonstre economia de RAM em uma sessão equivalente.

@@ -1,5 +1,7 @@
 //! Discord-style native desktop frontend. No webview or controller runtime.
 mod composer;
+mod login;
+mod online;
 use app_state::{AppState, ConversationId, Screen};
 use discord_core::{AccountId, Backend, BackendCommand, BackendConnection, MockBackend, Snapshot};
 use eframe::egui::{self, Color32, RichText, Stroke, Vec2};
@@ -16,6 +18,8 @@ const BLURPLE: Color32 = Color32::from_rgb(88, 101, 242);
 const GREEN: Color32 = Color32::from_rgb(35, 165, 90);
 
 pub struct Rustcord {
+    online: online::OnlineView,
+    demo: bool,
     state: AppState,
     backend: MockBackend,
     connection: BackendConnection,
@@ -73,6 +77,8 @@ impl Rustcord {
             .try_command(BackendCommand::RequestSnapshot)
             .expect("empty command queue");
         Self {
+            online: online::OnlineView::default(),
+            demo: smoke,
             state,
             backend,
             connection,
@@ -579,6 +585,18 @@ impl Rustcord {
 }
 impl eframe::App for Rustcord {
     fn ui(&mut self, root: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        if !self.demo {
+            self.demo = self.online.ui(root);
+            return;
+        }
+        egui::Panel::top("demo-banner").show(root, |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Demonstração local — dados fictícios");
+                if ui.button("Voltar ao login").clicked() {
+                    self.demo = false;
+                }
+            });
+        });
         self.backend_events();
         let start = Instant::now();
         let ctx = root.ctx().clone();
