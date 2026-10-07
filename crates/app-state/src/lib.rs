@@ -1,6 +1,13 @@
 //! Pure application reducer, shared by any future frontend.
 use discord_core::{Backend, BackendEvent, Message, MockBackend, Snapshot};
 use input::{AppAction, Direction, Region};
+use std::collections::HashMap;
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ComposerDraft {
+    pub text: String,
+    pub reply_to: Option<u64>,
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Screen {
     Main,
@@ -19,6 +26,7 @@ pub struct AppState {
     pub metrics: bool,
     pub notice: String,
     next_id: u64,
+    drafts: HashMap<(usize, usize), ComposerDraft>,
 }
 impl Default for AppState {
     fn default() -> Self {
@@ -50,6 +58,7 @@ impl AppState {
             metrics: cfg!(debug_assertions),
             notice: "Local demo · no Discord connection".into(),
             next_id,
+            drafts: HashMap::new(),
         }
     }
     pub fn channels(&self) -> &[discord_core::Channel] {
@@ -83,31 +92,69 @@ impl AppState {
         self.screen = screen;
         self.menu_item = 0;
     }
+    pub fn draft(&self) -> Option<&ComposerDraft> {
+        self.drafts.get(&(self.server, self.channel))
+    }
+    pub fn reply_target(&self) -> Option<&Message> {
+        let id = self.draft()?.reply_to?;
+        self.messages().iter().find(|m| m.id == id)
+    }
+    fn update_draft(&mut self, text: String) {
+        if self.channels().get(self.channel).is_none() {
+            return;
+        }
+        let key = (self.server, self.channel);
+        self.drafts.entry(key).or_default().text = text.chars().take(2000).collect();
+        self.remove_empty_draft();
+    }
+    fn remove_empty_draft(&mut self) {
+        let key = (self.server, self.channel);
+        if self
+            .drafts
+            .get(&key)
+            .is_some_and(|d| d.text.is_empty() && d.reply_to.is_none())
+        {
+            self.drafts.remove(&key);
+        }
+    }
+    fn reply_to(&mut self, id: u64) {
+        if self.messages().iter().any(|m| m.id == id) {
+            self.drafts
+                .entry((self.server, self.channel))
+                .or_default()
+                .reply_to = Some(id);
+            self.screen = Screen::Main;
+        }
+    }
     fn send(&mut self, text: String) {
         let text = text.trim();
         if text.is_empty() {
             return;
         }
-        if let Some(c) = self
+        let reply_to = self.reply_target().map(|m| m.id);
+        let Some(c) = self
             .data
             .servers
             .get_mut(self.server)
             .and_then(|s| s.channels.get_mut(self.channel))
-        {
-            c.messages.push(Message {
-                id: self.next_id,
-                author: "You".into(),
-                text: text.chars().take(2000).collect(),
-                time: "now".into(),
-                reactions: 0,
-            });
-            self.next_id += 1;
-            if c.messages.len() > 200 {
-                c.messages.remove(0);
-            }
-            self.message = c.messages.len() - 1;
-            self.region = Region::Conversation;
+        else {
+            return;
+        };
+        c.messages.push(Message {
+            id: self.next_id,
+            author: "You".into(),
+            text: text.chars().take(2000).collect(),
+            time: "now".into(),
+            reactions: 0,
+            reply_to,
+        });
+        self.next_id += 1;
+        if c.messages.len() > 200 {
+            c.messages.remove(0);
         }
+        self.message = c.messages.len() - 1;
+        self.region = Region::Conversation;
+        self.drafts.remove(&(self.server, self.channel));
         self.screen = Screen::Main;
         self.notice = "Message added locally".into();
     }
@@ -129,6 +176,26 @@ impl AppState {
         match action {
             AppAction::ToggleMetrics => {
                 self.metrics = !self.metrics;
+                return;
+            }
+            AppAction::UpdateDraft(text) => {
+                self.update_draft(text);
+                return;
+            }
+            AppAction::SendDraft => {
+                let text = self.draft().map_or_else(String::new, |d| d.text.clone());
+                self.send(text);
+                return;
+            }
+            AppAction::ReplyTo(id) => {
+                self.reply_to(id);
+                return;
+            }
+            AppAction::CancelReply => {
+                if let Some(draft) = self.drafts.get_mut(&(self.server, self.channel)) {
+                    draft.reply_to = None;
+                }
+                self.remove_empty_draft();
                 return;
             }
             AppAction::Submit(text) => {
@@ -242,6 +309,82 @@ fn wrapped(index: usize, delta: i32, len: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn drafts_are_isolated_by_channel_and_server() {
+        let mut s = AppState::default();
+        s.dispatch(AppAction::UpdateDraft("one\ntwo".into()));
+        s.dispatch(AppAction::ReplyTo(0));
+        s.dispatch(AppAction::SwitchChannel(1));
+        assert!(s.draft().is_none());
+        s.dispatch(AppAction::UpdateDraft("other channel".into()));
+        s.dispatch(AppAction::SwitchServer(1));
+        assert!(s.draft().is_none());
+        s.dispatch(AppAction::SwitchServer(-1));
+        assert_eq!(s.draft().unwrap().text, "one\ntwo");
+        assert_eq!(s.reply_target().unwrap().id, 0);
+        s.dispatch(AppAction::SwitchChannel(1));
+        assert_eq!(s.draft().unwrap().text, "other channel");
+    }
+    #[test]
+    fn sending_keeps_line_breaks_and_reply_reference_and_clears_only_this_draft() {
+        let mut s = AppState::default();
+        s.dispatch(AppAction::SwitchChannel(1));
+        s.dispatch(AppAction::UpdateDraft("keep this draft".into()));
+        s.dispatch(AppAction::SwitchChannel(-1));
+        s.dispatch(AppAction::ReplyTo(1));
+        s.dispatch(AppAction::UpdateDraft("first line\nsecond line".into()));
+        s.dispatch(AppAction::SendDraft);
+        let sent = s.messages().last().unwrap();
+        assert_eq!(sent.text, "first line\nsecond line");
+        assert_eq!(sent.reply_to, Some(1));
+        assert!(s.draft().is_none());
+        s.dispatch(AppAction::SwitchChannel(1));
+        assert_eq!(s.draft().unwrap().text, "keep this draft");
+    }
+    #[test]
+    fn blank_send_and_cancel_preserve_draft_text() {
+        let mut s = AppState::default();
+        let count = s.messages().len();
+        s.dispatch(AppAction::ReplyTo(0));
+        s.dispatch(AppAction::UpdateDraft(" \n ".into()));
+        s.dispatch(AppAction::SendDraft);
+        assert_eq!(s.messages().len(), count);
+        assert_eq!(s.draft().unwrap().reply_to, Some(0));
+        s.dispatch(AppAction::CancelReply);
+        assert_eq!(s.draft().unwrap().text, " \n ");
+        assert!(s.draft().unwrap().reply_to.is_none());
+        s.dispatch(AppAction::UpdateDraft(String::new()));
+        assert!(s.drafts.is_empty());
+    }
+    #[test]
+    fn expired_or_invalid_reply_never_points_to_another_message() {
+        let mut s = AppState::default();
+        s.dispatch(AppAction::ReplyTo(999999));
+        assert!(s.draft().is_none());
+        for _ in 0..194 {
+            s.dispatch(AppAction::Submit("filler".into()));
+        }
+        s.dispatch(AppAction::ReplyTo(0));
+        s.data.servers[0].channels[0].messages.remove(0);
+        assert!(s.reply_target().is_none());
+        s.dispatch(AppAction::UpdateDraft("a reply after eviction".into()));
+        s.dispatch(AppAction::SendDraft);
+        assert!(s.messages().last().unwrap().reply_to.is_none());
+    }
+    #[test]
+    fn unicode_drafts_have_a_character_budget_and_invalid_channels_allocate_nothing() {
+        let mut s = AppState::default();
+        s.dispatch(AppAction::UpdateDraft("漢".repeat(2100)));
+        assert_eq!(s.draft().unwrap().text.chars().count(), 2000);
+        let mut empty = AppState::new(Snapshot {
+            servers: vec![],
+            profile: "Test".into(),
+        });
+        empty.dispatch(AppAction::UpdateDraft("ignored".into()));
+        empty.dispatch(AppAction::ReplyTo(0));
+        empty.dispatch(AppAction::SendDraft);
+        assert!(empty.drafts.is_empty());
+    }
     #[test]
     fn actions_navigate_reply_react_and_restore_selection() {
         let mut s = AppState::default();

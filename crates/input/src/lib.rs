@@ -28,6 +28,10 @@ pub enum AppAction {
     SelectMenu(usize),
     ToggleMetrics,
     Submit(String),
+    UpdateDraft(String),
+    SendDraft,
+    ReplyTo(u64),
+    CancelReply,
     React,
 }
 #[derive(Clone, Copy)]
