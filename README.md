@@ -69,4 +69,9 @@ the web runtime. The project reuses native UI libraries and reimplements the
 familiar layout. Visual fidelity and full desktop interactions remain works in
 progress. No official logos/assets or proprietary fonts are bundled.
 
+## Contributing
+
+Use small tested commits on Git Flow branches. See [CONTRIBUTING.md](CONTRIBUTING.md).
+The current development build is on `develop`; `main` is reserved for releases.
+
 MIT OR Apache-2.0. Not affiliated with Discord.
