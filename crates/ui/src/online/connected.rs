@@ -22,6 +22,9 @@ impl OnlineView {
         if self.server == Some(server) {
             return;
         }
+        if let Some(connection) = &self.connection {
+            let _ = connection.command(Command::ClearSelection);
+        }
         self.server = Some(server);
         self.channel = None;
         self.members.clear();

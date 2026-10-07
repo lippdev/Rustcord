@@ -455,6 +455,8 @@ mod tests {
     }
     #[test]
     fn changing_guild_unsubscribes_previous_and_bounds_visible_range() {
+        let cleared = subscription(None, Some((ServerId::new(1), ChannelId::new(10))));
+        assert_eq!(cleared["d"]["subscriptions"]["1"]["channels"], json!({}));
         let data = subscription(
             Some((ServerId::new(2), ChannelId::new(20))),
             Some((ServerId::new(1), ChannelId::new(10))),

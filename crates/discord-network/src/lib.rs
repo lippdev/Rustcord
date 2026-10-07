@@ -29,6 +29,7 @@ pub enum Command {
     Channels(ServerId),
     History(ChannelId),
     Select(ServerId, ChannelId),
+    ClearSelection,
     Image(String),
 }
 /// One handle per login attempt. Drop cancels even while I/O or queues are blocked.
@@ -142,6 +143,10 @@ async fn session(
                     if let Err(error) = media_tx.try_send(url) {
                         publish(tx, wake, Event::Image(error.into_inner(), None)).await?;
                     }
+                    continue;
+                }
+                Command::ClearSelection => {
+                    let _ = selection_tx.send(None);
                     continue;
                 }
                 Command::Select(server, channel) => {
