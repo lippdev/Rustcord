@@ -61,8 +61,9 @@ precisam de revisão e verificação de links; CI precisa de validação do YAML
 comandos correspondentes. Não é necessário inventar testes para texto ou estilo.
 
 O repositório público é [lippdev/Rustcord](https://github.com/lippdev/Rustcord),
-com remote `origin`. A branch padrão inicial é `develop`, para expor o protótipo;
-`main` permanece reservada às releases. Publicar branches `feature/*` e abrir
+com remote `origin`. O protótipo está em `develop`; `main` permanece reservada
+às releases e ainda é a branch padrão do GitHub. Alterar a branch padrão para
+`develop` exige permissão administrativa, indisponível à integração atual. Publicar branches `feature/*` e abrir
 pull requests para `develop`; preservar os commits e integrar com merge commit.
 Releases e hotfixes seguem os destinos definidos acima.
 O executável está disponível em `develop`; instruções no [README](README.md).
