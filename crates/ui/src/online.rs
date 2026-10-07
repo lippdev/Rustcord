@@ -3,6 +3,13 @@ use discord_core::{ChannelId, ServerId, Snapshot};
 use discord_network::{Command, Connection, Event};
 use eframe::egui::{self, Color32};
 mod connected;
+mod images;
+use discord_core::{Member, MessageId};
+use images::Images;
+use std::{
+    collections::HashSet,
+    time::{Duration, Instant},
+};
 
 #[derive(Default)]
 pub(super) struct OnlineView {
@@ -13,6 +20,16 @@ pub(super) struct OnlineView {
     server: Option<ServerId>,
     channel: Option<ChannelId>,
     busy: bool,
+    images: Images,
+    members: Vec<Member>,
+    members_loaded: bool,
+    members_started: Option<Instant>,
+    voice: Vec<(u64, ChannelId)>,
+    realtime: bool,
+    hide_members: bool,
+    refresh_due: Option<Instant>,
+    deleted: HashSet<MessageId>,
+    history_error: Option<&'static str>,
 }
 impl OnlineView {
     fn poll(&mut self, ctx: &egui::Context) {
@@ -84,19 +101,78 @@ impl OnlineView {
                         .flat_map(|s| &mut s.channels)
                         .find(|c| c.id == channel)
                 {
-                    item.messages = messages;
+                    let newest = messages.last().map(|m| m.id);
+                    let mut merged = messages;
+                    for message in &item.messages {
+                        if newest.is_none_or(|id| message.id > id)
+                            && !merged.iter().any(|m| m.id == message.id)
+                        {
+                            merged.push(message.clone());
+                        }
+                    }
+                    merged.retain(|m| !self.deleted.contains(&m.id));
+                    merged.sort_by_key(|m| m.id);
+                    if merged.len() > 50 {
+                        merged.drain(..merged.len() - 50);
+                    }
+                    item.messages = merged;
                 }
                 self.busy = false;
-                self.status =
-                    "Histórico carregado. Use Atualizar para buscar as mensagens mais recentes.";
+                self.history_error = None;
+                self.status = "Histórico carregado.";
+            }
+            Event::Image(url, image) => self.images.accept(ctx, url, image),
+            Event::Realtime(connected) => self.realtime = connected,
+            Event::Members(server, channel, members)
+                if self.server == Some(server) && self.channel == Some(channel) =>
+            {
+                self.members = members;
+                self.members_loaded = true;
+                self.members_started = None;
+            }
+            Event::Voice(server, voice) if self.server == Some(server) => self.voice = voice,
+            Event::Message(channel, message) if self.channel == Some(channel) => {
+                if let Some(item) = self.selected_channel_mut() {
+                    if let Some(existing) = item.messages.iter_mut().find(|m| m.id == message.id) {
+                        *existing = message;
+                    } else {
+                        item.messages.push(message);
+                        item.messages.sort_by_key(|m| m.id);
+                        if item.messages.len() > 50 {
+                            item.messages.remove(0);
+                        }
+                    }
+                }
+            }
+            Event::Deleted(channel, ids) if self.channel == Some(channel) => {
+                if let Some(item) = self.selected_channel_mut() {
+                    item.messages.retain(|m| !ids.contains(&m.id));
+                }
+                if self.deleted.len() + ids.len() > 200 {
+                    self.deleted.clear();
+                }
+                self.deleted.extend(ids);
+            }
+            Event::Refresh(channel) if self.channel == Some(channel) => {
+                self.refresh_due
+                    .get_or_insert(Instant::now() + Duration::from_millis(750));
             }
             Event::Error(error) => {
                 self.qr = None;
                 self.busy = false;
                 self.status = error;
+                self.history_error = Some(error);
             }
             _ => {} // Responses never change a different selected conversation.
         }
+    }
+    fn selected_channel_mut(&mut self) -> Option<&mut discord_core::Channel> {
+        self.snapshot
+            .as_mut()?
+            .servers
+            .iter_mut()
+            .flat_map(|s| &mut s.channels)
+            .find(|c| Some(c.id) == self.channel)
     }
     fn request(&mut self, command: Command) {
         let result = self
@@ -145,7 +221,20 @@ impl OnlineView {
             }
             return false;
         }
+        if self.refresh_due.is_some_and(|due| Instant::now() >= due) && !self.busy {
+            self.refresh_due = None;
+            if let Some(channel) = self.channel {
+                self.request(Command::History(channel));
+            }
+        }
+        if self.refresh_due.is_some() {
+            ctx.request_repaint_after(Duration::from_millis(750));
+        }
+        if self.members_started.is_some() {
+            ctx.request_repaint_after(Duration::from_secs(1));
+        }
         self.connected_ui(root);
+        self.images.flush(self.connection.as_ref());
 
         false
     }
@@ -218,6 +307,125 @@ mod tests {
         assert!(view.busy);
         view.apply(Event::Channels(ServerId::new(99), Vec::new()), &ctx);
         assert_eq!(view.snapshot.as_ref().unwrap().servers[0].channels.len(), 1);
+    }
+    #[test]
+    fn live_messages_and_deletions_survive_an_in_flight_history_response() {
+        let ctx = egui::Context::default();
+        let snapshot = discord_core::MockBackend::snapshot();
+        let server = snapshot.servers[0].id;
+        let channel = snapshot.servers[0].channels[0].id;
+        let mut view = OnlineView {
+            snapshot: Some(snapshot),
+            server: Some(server),
+            channel: Some(channel),
+            ..Default::default()
+        };
+        view.selected_channel_mut().unwrap().messages.clear();
+        let message = |id| discord_core::Message {
+            id: MessageId::new(id),
+            author: "Test".into(),
+            text: "Live".into(),
+            time: String::new(),
+            reactions: 0,
+            reply_to: None,
+            details: Default::default(),
+        };
+        view.apply(Event::Message(channel, message(12)), &ctx);
+        view.apply(Event::Deleted(channel, vec![MessageId::new(10)]), &ctx);
+        view.apply(
+            Event::History(channel, vec![message(10), message(11)]),
+            &ctx,
+        );
+        let ids: Vec<_> = view
+            .selected_channel_mut()
+            .unwrap()
+            .messages
+            .iter()
+            .map(|m| m.id.get())
+            .collect();
+        assert_eq!(ids, vec![11, 12]);
+        for id in 13..100 {
+            view.apply(Event::Message(channel, message(id)), &ctx);
+        }
+        assert_eq!(view.selected_channel_mut().unwrap().messages.len(), 50);
+        view.apply(
+            Event::Members(
+                server,
+                ChannelId::new(999),
+                vec![Member {
+                    id: 1,
+                    name: "Other".into(),
+                    avatar: None,
+                    status: "online".into(),
+                }],
+            ),
+            &ctx,
+        );
+        assert!(view.members.is_empty());
+    }
+    #[test]
+    fn connected_content_renders_voice_members_and_media_without_network() {
+        let ctx = egui::Context::default();
+        let mut snapshot = discord_core::MockBackend::snapshot();
+        let server = snapshot.servers[0].id;
+        let channel = snapshot.servers[0].channels[0].id;
+        let mut voice = snapshot.servers[0].channels[1].clone();
+        voice.details.kind = discord_core::ChannelKind::Voice;
+        voice.name = "Voice room".into();
+        snapshot.servers[0].channels[1] = voice;
+        snapshot.servers[0].channels[0].messages[0]
+            .details
+            .attachments
+            .push(discord_core::Attachment {
+                name: "photo.png".into(),
+                url: "https://cdn.discordapp.com/test.png".into(),
+                image: true,
+            });
+        let mut view = OnlineView {
+            snapshot: Some(snapshot),
+            server: Some(server),
+            channel: Some(channel),
+            members: vec![Member {
+                id: 1,
+                name: "Member test".into(),
+                avatar: None,
+                status: "online".into(),
+            }],
+            members_loaded: true,
+            realtime: true,
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1280.0, 800.0),
+                )),
+                ..Default::default()
+            },
+            |ui| view.connected_ui(ui),
+        );
+        let mut texts = String::new();
+        fn collect(shape: &egui::epaint::Shape, texts: &mut String) {
+            match shape {
+                egui::epaint::Shape::Text(text) => texts.push_str(&text.galley.job.text),
+                egui::epaint::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        collect(shape, texts)
+                    }
+                }
+                _ => {}
+            }
+        }
+        output.textures_delta.clear();
+        for shape in output.shapes {
+            collect(&shape.shape, &mut texts);
+        }
+        assert!(texts.contains("Member test"));
+        assert!(texts.contains("Voice room"));
+        assert!(texts.contains("photo.png"));
+        assert!(texts.contains("Welcome in"));
+        assert!(view.connection.is_none());
     }
     #[test]
     fn scanning_or_error_discards_login_qr() {
