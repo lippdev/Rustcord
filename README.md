@@ -10,6 +10,8 @@ profile and message composer.
 **Current build uses local mock data.** There is no Discord login or connection.
 The official API does not generally authorize replacement clients for personal
 accounts; see [architecture](docs/architecture.md) for researched restrictions.
+The native personal-account backend discovery and proposed next steps are in
+[native backend discovery](docs/native-backend-discovery.md).
 
 ## Run
 

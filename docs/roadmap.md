@@ -10,20 +10,26 @@ primeiro um Discord nativo em Rust, com design e usabilidade familiares.
    escolhida pelo usuário, melhorar tipografia/ícones, seleção/cópia de texto,
    mensagens agrupadas, scroll/virtualização, composer multiline/IME, atalhos,
    menus e acessibilidade. Validar Windows/DPI e medir startup/working set/CPU.
-3. **Gate da API oficial**: confirmar caso de uso suportado/aprovado. OAuth2 não
-   autoriza automaticamente um substituto completo de contas pessoais. Se não
-   houver API adequada, manter mock ou adaptar a companion oficialmente permitido.
-4. **Backend autorizado**: OAuth2 e armazenamento seguro quando aplicáveis,
-   REST/rate-limit, Gateway/reconnect/intents, cache limitado e eventos separados.
-5. **Chat completo dentro das capabilities**: servidores/canais/DMs, attachments,
-   reactions, notificações, busca e deep links conforme acesso oficial disponível.
+3. **Discovery do backend nativo**: [concluída](native-backend-discovery.md).
+   Objetivo confirmado: conta pessoal e ausência de WebView. Serein é candidato
+   a reaproveitamento seletivo; login QR sem WebView ainda exige spike. OAuth2
+   comum não libera um substituto completo, e interoperabilidade não é aprovação.
+4. **Backend alternativo nativo**: começar com IDs estáveis e comandos/eventos
+   assíncronos; depois REST/rate-limit, Gateway/reconnect/Resume, cache limitado,
+   autenticação nativa e cofre do sistema. Validar primeiro com transportes locais
+   e depois com uma sessão controlada pelo dono da conta.
+5. **Chat conectado**: servidores/canais/DMs e mensagens primeiro; depois
+   attachments, reactions, notificações, busca e deep links, conforme capacidades
+   efetivamente implementadas e verificadas.
 6. **Áudio e distribuição**: voice/mute/deafen/volume via integração permitida;
    launcher/auto-update assinado, overlay isolado e serviços de plataforma.
 7. **Controle e Console Mode**: reavaliar depois da usabilidade desktop. Adaptador
    de actions pode ser reaproveitado, sem ditar o visual ou acoplar o projeto.
 
-Não implementar self-bots, tokens pessoais ou endpoints privados. Voice, vídeo,
-streaming, Activities, plugins e overlay continuam fora da fundação inicial.
+Não automatizar ações abusivas, extrair credenciais de outros aplicativos ou
+contornar MFA/CAPTCHA/restrições do serviço. Voice, vídeo, streaming, Activities,
+plugins e overlay continuam fora da fundação inicial. A discovery registra os
+limites dos termos e as incertezas da conexão alternativa; não houve sessão real.
 
 ## Progresso M2 — composer e ações de mensagem
 
