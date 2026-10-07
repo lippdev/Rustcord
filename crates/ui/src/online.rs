@@ -158,6 +158,11 @@ impl OnlineView {
                     .get_or_insert(Instant::now() + Duration::from_millis(750));
             }
             Event::Error(error) => {
+                if error == "Sessão expirada. Entre novamente." {
+                    *self = Self::default();
+                    self.status = error;
+                    return;
+                }
                 self.qr = None;
                 self.busy = false;
                 self.status = error;
