@@ -24,3 +24,16 @@ primeiro um Discord nativo em Rust, com design e usabilidade familiares.
 
 Não implementar self-bots, tokens pessoais ou endpoints privados. Voice, vídeo,
 streaming, Activities, plugins e overlay continuam fora da fundação inicial.
+
+## Progresso M2 — composer e ações de mensagem
+
+Concluído: editor multiline, Enter/Shift+Enter, rascunhos por canal, undo/cursor
+isolados, proteção de envio durante composição IME/repeat, menu contextual
+(mouse/F2), cópia de texto, resposta editável com referência e cancelamento por
+Escape. Tudo permanece local/mock, sem dependências novas.
+
+Próximo incremento recomendado: agrupamento de mensagens por autor/horário e
+histórico virtualizado, preservando scroll ao receber mensagens/alterar canal.
+Validar longos históricos, seleção/cópia e resize; testar Windows/MSVC com GPU,
+DPI e IMEs reais antes de release. A fidelidade visual ainda exige refinamento de
+ícones/tipografia e comparação com uma referência desktop específica do Discord.

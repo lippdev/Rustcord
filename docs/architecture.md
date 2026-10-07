@@ -119,6 +119,34 @@ fora do build e runtime padrão. Não há worker de gamepad ou dependência gilr
 aplicativo padrão. Integração com controles/Console Mode deve ser reconsiderada
 somente depois de provar a usabilidade desktop.
 
+## Composer e respostas locais — incremento M2
+
+`AppState` é a fonte de verdade dos rascunhos: texto limitado a 2.000 caracteres
+Unicode e ID opcional da mensagem respondida. `UpdateDraft`, `SendDraft`,
+`ReplyTo` e `CancelReply` são comandos independentes do dispositivo. A UI mantém
+somente o buffer do editor e estado de composição/foco. Cada conversa tem um ID
+egui distinto, isolando cursor e undo. Rascunhos vivem só em memória, limitados
+pelos canais do snapshot mock; as chaves atuais são índices servidor/canal.
+Antes de snapshots reais/reordenação, migrar para IDs estáveis de conversa e
+estabelecer orçamento global/expiração para rascunhos e estado dos editores.
+
+Enter envia apenas sem modificadores, com foco no editor, sem repetição e sem
+composição IME ativa; Shift+Enter insere linha. Frames com eventos IME não enviam
+mensagens: confirmar um candidato não pode enviar o texto. Testes sintetizam
+esses eventos; validar IMEs reais e acessibilidade no Windows continua pendente.
+O editor cresce até seis linhas visuais e depois permite scroll interno.
+
+Responder abre o composer e conserva o texto. Escape/cancelar remove somente a
+referência; enviar limpa apenas o rascunho atual. Referências usam o ID da mensagem,
+sem apontar para outra mensagem se o histórico descartar o original. Originais
+já descartados exibem aviso; enviar não conserva um alvo que não existe mais.
+A lista é limitada a 200 mensagens por canal e ainda não é virtualizada.
+
+Menu de mensagem é um popup nativo egui, com responder, reação local e copiar.
+Clipboard pertence ao adaptador UI/plataforma (`ctx.copy_text`), nunca ao core
+Discord. F2 usa o mesmo menu e reducer; ao confirmar a opção de cópia, a UI emite
+o comando de clipboard antes de fechar o menu. Configuração permanece modal.
+
 ## Performance e observabilidade
 
 Sem runtime async nem rede. Sem redraw contínuo; debug amostra métricas a 1 Hz,

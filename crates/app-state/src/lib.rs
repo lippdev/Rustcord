@@ -1,12 +1,18 @@
 //! Pure application reducer, shared by any future frontend.
 use discord_core::{Backend, BackendEvent, Message, MockBackend, Snapshot};
 use input::{AppAction, Direction, Region};
+use std::collections::HashMap;
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ComposerDraft {
+    pub text: String,
+    pub reply_to: Option<u64>,
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Screen {
     Main,
     Settings,
     Context,
-    Reply,
 }
 pub struct AppState {
     pub data: Snapshot,
@@ -19,6 +25,7 @@ pub struct AppState {
     pub metrics: bool,
     pub notice: String,
     next_id: u64,
+    drafts: HashMap<(usize, usize), ComposerDraft>,
 }
 impl Default for AppState {
     fn default() -> Self {
@@ -50,6 +57,7 @@ impl AppState {
             metrics: cfg!(debug_assertions),
             notice: "Local demo · no Discord connection".into(),
             next_id,
+            drafts: HashMap::new(),
         }
     }
     pub fn channels(&self) -> &[discord_core::Channel] {
@@ -65,9 +73,8 @@ impl AppState {
     }
     pub fn menu_len(&self) -> usize {
         match self.screen {
-            Screen::Reply => 3,
             Screen::Settings => 2,
-            Screen::Context => 2,
+            Screen::Context => 4,
             Screen::Main => 0,
         }
     }
@@ -83,31 +90,69 @@ impl AppState {
         self.screen = screen;
         self.menu_item = 0;
     }
+    pub fn draft(&self) -> Option<&ComposerDraft> {
+        self.drafts.get(&(self.server, self.channel))
+    }
+    pub fn reply_target(&self) -> Option<&Message> {
+        let id = self.draft()?.reply_to?;
+        self.messages().iter().find(|m| m.id == id)
+    }
+    fn update_draft(&mut self, text: String) {
+        if self.channels().get(self.channel).is_none() {
+            return;
+        }
+        let key = (self.server, self.channel);
+        self.drafts.entry(key).or_default().text = text.chars().take(2000).collect();
+        self.remove_empty_draft();
+    }
+    fn remove_empty_draft(&mut self) {
+        let key = (self.server, self.channel);
+        if self
+            .drafts
+            .get(&key)
+            .is_some_and(|d| d.text.is_empty() && d.reply_to.is_none())
+        {
+            self.drafts.remove(&key);
+        }
+    }
+    fn reply_to(&mut self, id: u64) {
+        if self.messages().iter().any(|m| m.id == id) {
+            self.drafts
+                .entry((self.server, self.channel))
+                .or_default()
+                .reply_to = Some(id);
+            self.screen = Screen::Main;
+        }
+    }
     fn send(&mut self, text: String) {
         let text = text.trim();
         if text.is_empty() {
             return;
         }
-        if let Some(c) = self
+        let reply_to = self.reply_target().map(|m| m.id);
+        let Some(c) = self
             .data
             .servers
             .get_mut(self.server)
             .and_then(|s| s.channels.get_mut(self.channel))
-        {
-            c.messages.push(Message {
-                id: self.next_id,
-                author: "You".into(),
-                text: text.chars().take(2000).collect(),
-                time: "now".into(),
-                reactions: 0,
-            });
-            self.next_id += 1;
-            if c.messages.len() > 200 {
-                c.messages.remove(0);
-            }
-            self.message = c.messages.len() - 1;
-            self.region = Region::Conversation;
+        else {
+            return;
+        };
+        c.messages.push(Message {
+            id: self.next_id,
+            author: "You".into(),
+            text: text.chars().take(2000).collect(),
+            time: "now".into(),
+            reactions: 0,
+            reply_to,
+        });
+        self.next_id += 1;
+        if c.messages.len() > 200 {
+            c.messages.remove(0);
         }
+        self.message = c.messages.len() - 1;
+        self.region = Region::Conversation;
+        self.drafts.remove(&(self.server, self.channel));
         self.screen = Screen::Main;
         self.notice = "Message added locally".into();
     }
@@ -129,6 +174,26 @@ impl AppState {
         match action {
             AppAction::ToggleMetrics => {
                 self.metrics = !self.metrics;
+                return;
+            }
+            AppAction::UpdateDraft(text) => {
+                self.update_draft(text);
+                return;
+            }
+            AppAction::SendDraft => {
+                let text = self.draft().map_or_else(String::new, |d| d.text.clone());
+                self.send(text);
+                return;
+            }
+            AppAction::ReplyTo(id) => {
+                self.reply_to(id);
+                return;
+            }
+            AppAction::CancelReply => {
+                if let Some(draft) = self.drafts.get_mut(&(self.server, self.channel)) {
+                    draft.reply_to = None;
+                }
+                self.remove_empty_draft();
                 return;
             }
             AppAction::Submit(text) => {
@@ -163,10 +228,14 @@ impl AppState {
                 }
                 AppAction::Confirm => match (self.screen, self.menu_item) {
                     (Screen::Settings, 0) => self.metrics = !self.metrics,
-                    (Screen::Reply, i @ 0..=1) => {
-                        self.send(["Count me in!", "Let's play tonight."][i].into())
+                    (Screen::Context, 0) => {
+                        if let Some(id) = self.messages().get(self.message).map(|m| m.id) {
+                            self.reply_to(id);
+                        } else {
+                            self.screen = Screen::Main;
+                        }
                     }
-                    (Screen::Context, 0) => self.react(),
+                    (Screen::Context, 1) => self.react(),
                     _ => self.screen = Screen::Main,
                 },
                 _ => {}
@@ -174,6 +243,9 @@ impl AppState {
             return;
         }
         match action {
+            AppAction::Back if self.draft().is_some_and(|d| d.reply_to.is_some()) => {
+                self.dispatch(AppAction::CancelReply);
+            }
             AppAction::Navigate(Direction::Left) | AppAction::PreviousRegion | AppAction::Back => {
                 self.region_step(-1)
             }
@@ -224,7 +296,11 @@ impl AppState {
                 }
             }
             AppAction::Context => self.open(Screen::Context),
-            AppAction::Reply => self.open(Screen::Reply),
+            AppAction::Reply => {
+                if let Some(id) = self.messages().get(self.message).map(|m| m.id) {
+                    self.reply_to(id);
+                }
+            }
             _ => {}
         }
     }
@@ -243,6 +319,82 @@ fn wrapped(index: usize, delta: i32, len: usize) -> usize {
 mod tests {
     use super::*;
     #[test]
+    fn drafts_are_isolated_by_channel_and_server() {
+        let mut s = AppState::default();
+        s.dispatch(AppAction::UpdateDraft("one\ntwo".into()));
+        s.dispatch(AppAction::ReplyTo(0));
+        s.dispatch(AppAction::SwitchChannel(1));
+        assert!(s.draft().is_none());
+        s.dispatch(AppAction::UpdateDraft("other channel".into()));
+        s.dispatch(AppAction::SwitchServer(1));
+        assert!(s.draft().is_none());
+        s.dispatch(AppAction::SwitchServer(-1));
+        assert_eq!(s.draft().unwrap().text, "one\ntwo");
+        assert_eq!(s.reply_target().unwrap().id, 0);
+        s.dispatch(AppAction::SwitchChannel(1));
+        assert_eq!(s.draft().unwrap().text, "other channel");
+    }
+    #[test]
+    fn sending_keeps_line_breaks_and_reply_reference_and_clears_only_this_draft() {
+        let mut s = AppState::default();
+        s.dispatch(AppAction::SwitchChannel(1));
+        s.dispatch(AppAction::UpdateDraft("keep this draft".into()));
+        s.dispatch(AppAction::SwitchChannel(-1));
+        s.dispatch(AppAction::ReplyTo(1));
+        s.dispatch(AppAction::UpdateDraft("first line\nsecond line".into()));
+        s.dispatch(AppAction::SendDraft);
+        let sent = s.messages().last().unwrap();
+        assert_eq!(sent.text, "first line\nsecond line");
+        assert_eq!(sent.reply_to, Some(1));
+        assert!(s.draft().is_none());
+        s.dispatch(AppAction::SwitchChannel(1));
+        assert_eq!(s.draft().unwrap().text, "keep this draft");
+    }
+    #[test]
+    fn blank_send_and_cancel_preserve_draft_text() {
+        let mut s = AppState::default();
+        let count = s.messages().len();
+        s.dispatch(AppAction::ReplyTo(0));
+        s.dispatch(AppAction::UpdateDraft(" \n ".into()));
+        s.dispatch(AppAction::SendDraft);
+        assert_eq!(s.messages().len(), count);
+        assert_eq!(s.draft().unwrap().reply_to, Some(0));
+        s.dispatch(AppAction::CancelReply);
+        assert_eq!(s.draft().unwrap().text, " \n ");
+        assert!(s.draft().unwrap().reply_to.is_none());
+        s.dispatch(AppAction::UpdateDraft(String::new()));
+        assert!(s.drafts.is_empty());
+    }
+    #[test]
+    fn expired_or_invalid_reply_never_points_to_another_message() {
+        let mut s = AppState::default();
+        s.dispatch(AppAction::ReplyTo(999999));
+        assert!(s.draft().is_none());
+        for _ in 0..194 {
+            s.dispatch(AppAction::Submit("filler".into()));
+        }
+        s.dispatch(AppAction::ReplyTo(0));
+        s.data.servers[0].channels[0].messages.remove(0);
+        assert!(s.reply_target().is_none());
+        s.dispatch(AppAction::UpdateDraft("a reply after eviction".into()));
+        s.dispatch(AppAction::SendDraft);
+        assert!(s.messages().last().unwrap().reply_to.is_none());
+    }
+    #[test]
+    fn unicode_drafts_have_a_character_budget_and_invalid_channels_allocate_nothing() {
+        let mut s = AppState::default();
+        s.dispatch(AppAction::UpdateDraft("漢".repeat(2100)));
+        assert_eq!(s.draft().unwrap().text.chars().count(), 2000);
+        let mut empty = AppState::new(Snapshot {
+            servers: vec![],
+            profile: "Test".into(),
+        });
+        empty.dispatch(AppAction::UpdateDraft("ignored".into()));
+        empty.dispatch(AppAction::ReplyTo(0));
+        empty.dispatch(AppAction::SendDraft);
+        assert!(empty.drafts.is_empty());
+    }
+    #[test]
     fn actions_navigate_reply_react_and_restore_selection() {
         let mut s = AppState::default();
         s.dispatch(AppAction::Confirm);
@@ -252,9 +404,13 @@ mod tests {
         s.dispatch(AppAction::Confirm);
         assert_eq!(s.region, Region::Conversation);
         s.dispatch(AppAction::Reply);
-        s.dispatch(AppAction::Confirm);
-        assert_eq!(s.messages().last().unwrap().text, "Count me in!");
+        assert_eq!(s.screen, Screen::Main);
+        let target = s.messages()[s.message].id;
+        s.dispatch(AppAction::UpdateDraft("Written reply".into()));
+        s.dispatch(AppAction::SendDraft);
+        assert_eq!(s.messages().last().unwrap().reply_to, Some(target));
         s.dispatch(AppAction::Context);
+        s.dispatch(AppAction::SelectMenu(1));
         s.dispatch(AppAction::Confirm);
         assert_eq!(s.messages().last().unwrap().reactions, 1);
         s.dispatch(AppAction::Menu);
@@ -264,6 +420,20 @@ mod tests {
         assert_eq!(s.region, Region::Conversation);
         s.dispatch(AppAction::Back);
         assert_eq!(s.region, Region::Channels);
+    }
+    #[test]
+    fn escape_cancels_reply_without_losing_text_or_selection() {
+        let mut s = AppState::default();
+        s.dispatch(AppAction::Select(Region::Conversation, 2));
+        s.dispatch(AppAction::Reply);
+        s.dispatch(AppAction::UpdateDraft("still writing".into()));
+        s.dispatch(AppAction::Back);
+        assert!(s.reply_target().is_none());
+        assert_eq!(s.draft().unwrap().text, "still writing");
+        assert_eq!((s.region, s.message), (Region::Conversation, 2));
+        s.dispatch(AppAction::Context);
+        s.dispatch(AppAction::Confirm);
+        assert_eq!(s.reply_target().unwrap().id, s.messages()[2].id);
     }
     #[test]
     fn modal_captures_navigation_and_switching() {

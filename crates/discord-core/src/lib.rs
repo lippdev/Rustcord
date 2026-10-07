@@ -6,6 +6,8 @@ pub struct Message {
     pub text: String,
     pub time: String,
     pub reactions: u32,
+    /// Local reference to an earlier message in the same channel.
+    pub reply_to: Option<u64>,
 }
 #[derive(Clone, Debug)]
 pub struct Channel {
@@ -65,7 +67,7 @@ impl Backend for MockBackend {
                         ].iter().enumerate().map(|(mi, (author, text))| Message {
                             id: (si * 1000 + ci * 100 + mi) as u64,
                             author: (*author).into(), text: (*text).into(),
-                            time: format!("20:{:02}", 12 + mi * 3), reactions: 0,
+                            time: format!("20:{:02}", 12 + mi * 3), reactions: 0, reply_to: None,
                         }).collect(),
                     }).collect(),
             }).collect();
