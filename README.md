@@ -10,11 +10,15 @@ profile and message composer.
 **Experimental native QR login and read-only Discord access are implemented.**
 Start with **Entrar com QR**, scan using the Discord mobile app, and confirm there.
 Select a server and text channel to fetch the latest 50 messages; **Atualizar**
-reloads them. Session credentials stay inside the network worker in memory, with
+reloads them. Live create/update/delete events, user/server avatars, image thumbnails,
+attachments, voice channel names and a bounded channel member sidebar are implemented.
+Session credentials stay inside the network worker in memory, with
 no password/token entry or saved login. This is an independent alternative client,
 not an officially approved integration. QR approval and authenticated reads were observed on macOS; Windows validation is pending.
 
-Sending, live chat updates, DMs, attachments and voice are not implemented online.
+Sending, DMs, native audio calls, full Markdown and forum/thread browsing remain unfinished.
+The new content/Gateway flow has local transport tests and a graphical synthetic preview;
+verification with a real account and on Windows is still pending.
 **Abrir demonstração local** opens the earlier mock/composer prototype; its sends
 and reactions never reach Discord. The screenshot above shows that local demo.
 See [native connection](docs/native-connection.md) for implementation and validation,
@@ -78,7 +82,7 @@ CI is configured for Windows and Linux. Physical Windows validation is pending.
 ## Structure
 
 `app` composes the native window; `discord-core` owns models/mock/backend boundary;
-`discord-network` owns QR authentication and bounded HTTPS reads;
+`discord-network` owns QR authentication, bounded HTTPS/CDN reads and Gateway subscriptions;
 `app-state` owns local demo state/actions; `input` maps input independently of Discord;
 `ui` renders the desktop layout; `platform` samples process metrics.
 

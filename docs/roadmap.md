@@ -19,7 +19,8 @@ primeiro um Discord nativo em Rust, com design e usabilidade familiares.
    assíncronos; depois REST/rate-limit, Gateway/reconnect/Resume, cache limitado,
    autenticação nativa e cofre do sistema. Validar primeiro com transportes locais
    e depois com uma sessão controlada pelo dono da conta. IDs/filas e login QR
-   com leituras HTTPS estão implementados; Gateway e cofre seguem pendentes.
+   com leituras HTTPS, Gateway/Resume e cache limitado de mídia estão implementados
+   e testados localmente; cofre e validação live do Gateway seguem pendentes.
 5. **Chat conectado**: servidores/canais/DMs e mensagens primeiro; depois
    attachments, reactions, notificações, busca e deep links, conforme capacidades
    efetivamente implementadas e verificadas.
@@ -31,7 +32,8 @@ primeiro um Discord nativo em Rust, com design e usabilidade familiares.
 Não automatizar ações abusivas, extrair credenciais de outros aplicativos ou
 contornar MFA/CAPTCHA/restrições do serviço. Voice, vídeo, streaming, Activities,
 plugins e overlay continuam fora da fundação inicial. A discovery registra os
-limites dos termos e as incertezas da conexão alternativa; não houve sessão real.
+limites dos termos e as incertezas da conexão alternativa; QR e leituras reais foram observados; os novos eventos Gateway ainda precisam
+de validação com conta real.
 
 ## Progresso M2 — composer e ações de mensagem
 
@@ -53,6 +55,9 @@ com ACK, expiração/cancelamento e sessão em memória. Leitura de perfil/servi
 canais de texto e últimas 50 mensagens, com atualização manual, limites de payload
 e tratamento de 401/403/429. Testes locais não comprovam login live.
 
-QR e leituras reais foram observados com o dono da conta. Próximo passo: envio explícito e
-Gateway com heartbeat, reconexão/Resume e eventos create/update/delete. Não há
+QR e leituras reais foram observados com o dono da conta. Implementados/testados
+localmente: Gateway com heartbeat/reconexão/Resume, create/update/delete, fotos,
+anexos/embeds, categorias/voz visíveis e painel com até 200 posições de membros.
+Ainda pendentes: validação desses fluxos com conta real, envio explícito,
+paginação de histórico, DMs, fóruns e áudio nativo. Não há
 medição comparativa que demonstre economia de RAM em uma sessão equivalente.

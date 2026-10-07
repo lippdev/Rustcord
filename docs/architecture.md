@@ -130,13 +130,14 @@ Evitar a dependência cíclica UI/input: as duas produzem comandos, estado é a
 fonte de verdade. Backend futuro deve emitir eventos em fila limitada com
 cancelamento/backpressure; UI não espera rede. Cache de mensagens limitado e
 paginação/virtualização necessários para expandir o histórico. O modo conectado
-limita a leitura a 50 mensagens do canal atual; usa Tokio, reqwest/rustls e
+limita a leitura a 50 mensagens do canal atual; inclui mídia CDN e Gateway
+com assinatura limitada de membros, eventos de mensagens e Resume. Usa Tokio, reqwest/rustls e
 tokio-tungstenite. Possui filas de oito slots e cancelamento da tarefa inteira,
 inclusive com I/O pendente ou fila cheia. Cada tentativa possui seu próprio
 receiver; sair/cancelar descarta a tentativa e todos os seus eventos.
 A tela de leitura mantém seleção por IDs em `OnlineView`, separada do reducer
 de edição local, para não simular envio/reação em canais reais. Unificar a
-coordenação de sessão no reducer será necessário ao implementar envio/Gateway.
+coordenação de sessão no reducer será necessário ao implementar envio e unificar o estado conectado.
 
 Pesquisa para etapa futura, desativada no app atual: **gilrs 0.11.2**, mapeamentos padronizados, hotplug, Windows Gaming Input (WGI) padrão no Windows,
 udev no Linux. SDL3 é alternativa abrangente mas acrescenta runtime/build C;
