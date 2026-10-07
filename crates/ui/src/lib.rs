@@ -1,6 +1,6 @@
 //! Discord-style native desktop frontend. No webview or controller runtime.
 mod composer;
-use app_state::{AppState, Screen};
+use app_state::{AppState, ConversationId, Screen};
 use eframe::egui::{self, Color32, RichText, Stroke, Vec2};
 use input::{AppAction, Key, Region};
 use platform::Metrics;
@@ -20,14 +20,14 @@ pub struct Rustcord {
     started: Instant,
     first_frame: bool,
     draft: String,
-    draft_conversation: (usize, usize),
+    draft_conversation: Option<ConversationId>,
     composer_input: composer::ComposerInput,
     focus_composer: bool,
     context_anchor: egui::Pos2,
     smoke: bool,
     smoke_step: usize,
     smoke_done: bool,
-    last_conversation: (usize, usize),
+    last_conversation: Option<ConversationId>,
     last_message_count: usize,
 }
 impl Rustcord {
@@ -65,14 +65,14 @@ impl Rustcord {
             started,
             first_frame: true,
             draft: String::new(),
-            draft_conversation: (usize::MAX, usize::MAX),
+            draft_conversation: None,
             composer_input: composer::ComposerInput::default(),
             focus_composer: false,
             context_anchor: egui::pos2(520.0, 240.0),
             smoke,
             smoke_step: 0,
             smoke_done: false,
-            last_conversation: (usize::MAX, usize::MAX),
+            last_conversation: None,
             last_message_count: 0,
         }
     }
@@ -315,7 +315,7 @@ impl Rustcord {
                         });
                     });
                 self.composer_panel(ui);
-                let conversation = (self.state.server, self.state.channel);
+                let conversation = self.state.conversation();
                 let scroll_bottom = conversation != self.last_conversation
                     || self.state.messages().len() != self.last_message_count;
                 self.last_conversation = conversation;

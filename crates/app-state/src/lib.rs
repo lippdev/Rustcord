@@ -1,12 +1,15 @@
 //! Pure application reducer, shared by any future frontend.
-use discord_core::{Backend, BackendEvent, Message, MockBackend, Snapshot};
+pub use discord_core::ConversationId;
+use discord_core::{
+    Backend, BackendEvent, Message, MessageId, MockBackend, Snapshot, SnapshotError,
+};
 use input::{AppAction, Direction, Region};
 use std::collections::HashMap;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ComposerDraft {
     pub text: String,
-    pub reply_to: Option<u64>,
+    pub reply_to: Option<MessageId>,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Screen {
@@ -24,8 +27,8 @@ pub struct AppState {
     pub menu_item: usize,
     pub metrics: bool,
     pub notice: String,
-    next_id: u64,
-    drafts: HashMap<(usize, usize), ComposerDraft>,
+    next_id: Option<u64>,
+    drafts: HashMap<ConversationId, ComposerDraft>,
 }
 impl Default for AppState {
     fn default() -> Self {
@@ -42,10 +45,10 @@ impl AppState {
             .iter()
             .flat_map(|s| &s.channels)
             .flat_map(|c| &c.messages)
-            .map(|m| m.id)
+            .map(|m| m.id.get())
             .max()
             .unwrap_or(0)
-            + 1;
+            .checked_add(1);
         Self {
             data,
             server: 0,
@@ -65,6 +68,72 @@ impl AppState {
             .servers
             .get(self.server)
             .map_or(&[], |s| s.channels.as_slice())
+    }
+    pub fn conversation(&self) -> Option<ConversationId> {
+        Some(ConversationId {
+            account: self.data.account,
+            channel: self.channels().get(self.channel)?.id,
+        })
+    }
+    /// Preserve selection and drafts by identity when navigation/history changes.
+    /// Validate first so an ambiguous snapshot cannot discard existing state.
+    pub fn replace_snapshot(&mut self, data: Snapshot) -> Result<(), SnapshotError> {
+        data.validate()?;
+        let same_account = data.account == self.data.account;
+        let server = self.data.servers.get(self.server).map(|s| s.id);
+        let channel = self.conversation().map(|c| c.channel);
+        let message = self.messages().get(self.message).map(|m| m.id);
+        let incoming_next = data
+            .servers
+            .iter()
+            .flat_map(|s| &s.channels)
+            .flat_map(|c| &c.messages)
+            .map(|m| m.id.get())
+            .max()
+            .unwrap_or(0)
+            .checked_add(1);
+        self.next_id = if same_account {
+            self.next_id
+                .and_then(|next| incoming_next.map(|n| n.max(next)))
+        } else {
+            self.drafts.clear();
+            incoming_next
+        };
+        self.data = data;
+        self.server = 0;
+        self.channel = 0;
+        self.message = 0;
+        if same_account {
+            if let Some((si, ci)) = self.data.servers.iter().enumerate().find_map(|(si, s)| {
+                s.channels
+                    .iter()
+                    .position(|c| Some(c.id) == channel)
+                    .map(|ci| (si, ci))
+            }) {
+                self.server = si;
+                self.channel = ci;
+                self.message = self
+                    .messages()
+                    .iter()
+                    .position(|m| Some(m.id) == message)
+                    .unwrap_or(0);
+            } else if let Some(si) = self.data.servers.iter().position(|s| Some(s.id) == server) {
+                self.server = si;
+            }
+        }
+        let channels: std::collections::HashSet<_> = self
+            .data
+            .servers
+            .iter()
+            .flat_map(|s| &s.channels)
+            .map(|c| c.id)
+            .collect();
+        self.drafts
+            .retain(|key, _| key.account == self.data.account && channels.contains(&key.channel));
+        // A menu opened on a vanished message must never act on its replacement.
+        self.screen = Screen::Main;
+        self.menu_item = 0;
+        Ok(())
     }
     pub fn messages(&self) -> &[Message] {
         self.channels()
@@ -91,22 +160,23 @@ impl AppState {
         self.menu_item = 0;
     }
     pub fn draft(&self) -> Option<&ComposerDraft> {
-        self.drafts.get(&(self.server, self.channel))
+        self.drafts.get(&self.conversation()?)
     }
     pub fn reply_target(&self) -> Option<&Message> {
         let id = self.draft()?.reply_to?;
         self.messages().iter().find(|m| m.id == id)
     }
     fn update_draft(&mut self, text: String) {
-        if self.channels().get(self.channel).is_none() {
+        let Some(key) = self.conversation() else {
             return;
-        }
-        let key = (self.server, self.channel);
+        };
         self.drafts.entry(key).or_default().text = text.chars().take(2000).collect();
         self.remove_empty_draft();
     }
     fn remove_empty_draft(&mut self) {
-        let key = (self.server, self.channel);
+        let Some(key) = self.conversation() else {
+            return;
+        };
         if self
             .drafts
             .get(&key)
@@ -115,12 +185,12 @@ impl AppState {
             self.drafts.remove(&key);
         }
     }
-    fn reply_to(&mut self, id: u64) {
+    fn reply_to(&mut self, id: MessageId) {
         if self.messages().iter().any(|m| m.id == id) {
-            self.drafts
-                .entry((self.server, self.channel))
-                .or_default()
-                .reply_to = Some(id);
+            let Some(key) = self.conversation() else {
+                return;
+            };
+            self.drafts.entry(key).or_default().reply_to = Some(id);
             self.screen = Screen::Main;
         }
     }
@@ -129,6 +199,13 @@ impl AppState {
         if text.is_empty() {
             return;
         }
+        let Some(key) = self.conversation() else {
+            return;
+        };
+        let Some(id) = self.next_id else {
+            self.notice = "Local message IDs exhausted".into();
+            return;
+        };
         let reply_to = self.reply_target().map(|m| m.id);
         let Some(c) = self
             .data
@@ -139,20 +216,20 @@ impl AppState {
             return;
         };
         c.messages.push(Message {
-            id: self.next_id,
+            id: MessageId::new(id),
             author: "You".into(),
             text: text.chars().take(2000).collect(),
             time: "now".into(),
             reactions: 0,
             reply_to,
         });
-        self.next_id += 1;
+        self.next_id = id.checked_add(1);
         if c.messages.len() > 200 {
             c.messages.remove(0);
         }
         self.message = c.messages.len() - 1;
         self.region = Region::Conversation;
-        self.drafts.remove(&(self.server, self.channel));
+        self.drafts.remove(&key);
         self.screen = Screen::Main;
         self.notice = "Message added locally".into();
     }
@@ -186,11 +263,14 @@ impl AppState {
                 return;
             }
             AppAction::ReplyTo(id) => {
-                self.reply_to(id);
+                self.reply_to(MessageId::new(id));
                 return;
             }
             AppAction::CancelReply => {
-                if let Some(draft) = self.drafts.get_mut(&(self.server, self.channel)) {
+                if let Some(draft) = self
+                    .conversation()
+                    .and_then(|key| self.drafts.get_mut(&key))
+                {
                     draft.reply_to = None;
                 }
                 self.remove_empty_draft();
@@ -319,6 +399,95 @@ fn wrapped(index: usize, delta: i32, len: usize) -> usize {
 mod tests {
     use super::*;
     #[test]
+    fn snapshot_reorder_and_channel_move_keep_selection_draft_and_reply() {
+        let mut s = AppState::default();
+        s.dispatch(AppAction::Select(Region::Conversation, 2));
+        s.dispatch(AppAction::Reply);
+        s.dispatch(AppAction::UpdateDraft("belongs to this channel".into()));
+        let conversation = s.conversation();
+        let selected = s.messages()[s.message].id;
+        let mut next = s.data.clone();
+        next.servers.reverse();
+        let mut moved = next.servers.last_mut().unwrap().channels.remove(0);
+        moved.name = "renamed".into();
+        moved.messages.reverse();
+        next.servers[0].channels.insert(1, moved);
+        s.replace_snapshot(next).unwrap();
+        assert_eq!(s.conversation(), conversation);
+        assert_eq!(s.messages()[s.message].id, selected);
+        assert_eq!(s.reply_target().unwrap().id, selected);
+        assert_eq!(s.draft().unwrap().text, "belongs to this channel");
+        assert_eq!((s.server, s.channel), (0, 1));
+    }
+    #[test]
+    fn removal_drops_draft_and_context_without_retargeting_a_reply() {
+        let mut s = AppState::default();
+        s.dispatch(AppAction::Reply);
+        s.dispatch(AppAction::UpdateDraft("removed channel".into()));
+        s.dispatch(AppAction::Context);
+        let removed = s.channels()[0].clone();
+        let mut next = s.data.clone();
+        next.servers[0].channels.remove(0);
+        s.replace_snapshot(next).unwrap();
+        assert!(s.drafts.is_empty());
+        assert!(s.draft().is_none());
+        assert_eq!(s.screen, Screen::Main);
+        let mut next = s.data.clone();
+        next.servers[0].channels.insert(0, removed);
+        s.replace_snapshot(next).unwrap();
+        s.dispatch(AppAction::Select(Region::Channels, 0));
+        assert!(s.draft().is_none());
+    }
+    #[test]
+    fn switching_accounts_clears_drafts_even_with_identical_channel_ids() {
+        let mut s = AppState::default();
+        s.dispatch(AppAction::UpdateDraft("private account draft".into()));
+        let old = s.conversation();
+        let mut next = s.data.clone();
+        next.account = discord_core::AccountId::new(2);
+        s.replace_snapshot(next).unwrap();
+        assert_ne!(s.conversation(), old);
+        assert!(s.drafts.is_empty());
+    }
+    #[test]
+    fn malformed_snapshot_does_not_replace_navigation_or_drafts() {
+        let mut s = AppState::default();
+        s.dispatch(AppAction::UpdateDraft("preserve me".into()));
+        let old = s.conversation();
+        for expected in [
+            SnapshotError::DuplicateServer,
+            SnapshotError::DuplicateChannel,
+            SnapshotError::DuplicateMessage,
+        ] {
+            let mut next = s.data.clone();
+            match expected {
+                SnapshotError::DuplicateServer => next.servers[1].id = next.servers[0].id,
+                SnapshotError::DuplicateChannel => {
+                    next.servers[1].channels[0].id = next.servers[0].channels[0].id
+                }
+                SnapshotError::DuplicateMessage => {
+                    next.servers[1].channels[0].messages[0].id =
+                        next.servers[0].channels[0].messages[0].id
+                }
+            }
+            assert_eq!(s.replace_snapshot(next), Err(expected));
+            assert_eq!(s.conversation(), old);
+            assert_eq!(s.draft().unwrap().text, "preserve me");
+        }
+    }
+    #[test]
+    fn exhausted_local_ids_preserve_unsent_text_without_overflow() {
+        let mut data = AppState::default().data;
+        data.servers[0].channels[0].messages[0].id = MessageId::new(u64::MAX);
+        let mut s = AppState::new(data);
+        let count = s.messages().len();
+        s.dispatch(AppAction::UpdateDraft("still unsent".into()));
+        s.dispatch(AppAction::SendDraft);
+        assert_eq!(s.messages().len(), count);
+        assert_eq!(s.draft().unwrap().text, "still unsent");
+        assert_eq!(s.notice, "Local message IDs exhausted");
+    }
+    #[test]
     fn drafts_are_isolated_by_channel_and_server() {
         let mut s = AppState::default();
         s.dispatch(AppAction::UpdateDraft("one\ntwo".into()));
@@ -330,7 +499,7 @@ mod tests {
         assert!(s.draft().is_none());
         s.dispatch(AppAction::SwitchServer(-1));
         assert_eq!(s.draft().unwrap().text, "one\ntwo");
-        assert_eq!(s.reply_target().unwrap().id, 0);
+        assert_eq!(s.reply_target().unwrap().id, MessageId::new(0));
         s.dispatch(AppAction::SwitchChannel(1));
         assert_eq!(s.draft().unwrap().text, "other channel");
     }
@@ -345,7 +514,7 @@ mod tests {
         s.dispatch(AppAction::SendDraft);
         let sent = s.messages().last().unwrap();
         assert_eq!(sent.text, "first line\nsecond line");
-        assert_eq!(sent.reply_to, Some(1));
+        assert_eq!(sent.reply_to, Some(MessageId::new(1)));
         assert!(s.draft().is_none());
         s.dispatch(AppAction::SwitchChannel(1));
         assert_eq!(s.draft().unwrap().text, "keep this draft");
@@ -358,7 +527,7 @@ mod tests {
         s.dispatch(AppAction::UpdateDraft(" \n ".into()));
         s.dispatch(AppAction::SendDraft);
         assert_eq!(s.messages().len(), count);
-        assert_eq!(s.draft().unwrap().reply_to, Some(0));
+        assert_eq!(s.draft().unwrap().reply_to, Some(MessageId::new(0)));
         s.dispatch(AppAction::CancelReply);
         assert_eq!(s.draft().unwrap().text, " \n ");
         assert!(s.draft().unwrap().reply_to.is_none());
@@ -386,6 +555,7 @@ mod tests {
         s.dispatch(AppAction::UpdateDraft("漢".repeat(2100)));
         assert_eq!(s.draft().unwrap().text.chars().count(), 2000);
         let mut empty = AppState::new(Snapshot {
+            account: discord_core::AccountId::new(1),
             servers: vec![],
             profile: "Test".into(),
         });
@@ -449,6 +619,7 @@ mod tests {
     #[test]
     fn empty_snapshot_and_long_sequences_are_safe() {
         let mut s = AppState::new(Snapshot {
+            account: discord_core::AccountId::new(1),
             servers: vec![],
             profile: "Test".into(),
         });
