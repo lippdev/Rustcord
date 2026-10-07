@@ -70,7 +70,7 @@ antes de fixar uma política definitiva de velocidade versus tamanho.
 ## Dependências e direção de dados
 
 ```text
-backend autorizado futuro -> BackendEvent -> AppState/reducer -> Ui view
+backend nativo -> SessionEvent -> AppState/reducer -> Ui view
                                               ^                    |
 mouse / teclado / gilrs -> AppAction -----------+ <-----------------+
 platform -> amostragem de métricas / futuros serviços de SO
@@ -86,6 +86,39 @@ app -> composição, janela, lifecycle
   pelo mesmo reducer; biblioteca nativa cuida do editor de texto.
 - `platform`: métricas RSS/working set e futuros serviços nativos.
 - `app`: binário, composição e opções de execução.
+
+## Fundação do backend nativo
+
+`AccountId`, `ServerId`, `ChannelId` e `MessageId` são tipos distintos sobre u64.
+Índices continuam apenas como posição de navegação da UI. A troca de snapshot
+valida IDs duplicados antes de alterar o estado, restaura seleção por identidade
+(inclusive quando um canal muda de servidor) e descarta rascunhos de canais
+removidos ou de outra conta. IDs locais esgotados não fazem overflow nem apagam
+o texto não enviado.
+
+`backend_channel` separa `BackendConnection` (UI) de `BackendWorker` (adaptador),
+com 16 slots de comandos e 16 de eventos. A UI usa apenas operações não
+bloqueantes. Publicação numa fila cheia devolve o evento ao produtor; o mock
+retém um snapshot pendente para tentar novamente. Um callback sem dependência
+de egui acorda a UI após publicação, sem um timer permanente de polling.
+`wait_command` bloqueia apenas um worker dedicado; não deve rodar na UI nem
+diretamente num executor Tokio. O adaptador de rede futuro precisará conectar
+esse transporte ao seu runtime e limitar também bytes decodificados: limites
+de slots sozinhos não limitam o tamanho de snapshots.
+
+Eventos carregam `SessionGeneration`; `begin_session` avança a geração e limpa
+estado/rascunhos. Eventos de gerações anteriores são ignorados. Reconnect da
+mesma sessão não deve chamar `begin_session`. Cancelar ou soltar a conexão
+marca cancelamento, fecha o sender de comandos e solta a fila de eventos;
+cancelamento não depende de haver um slot livre. O coordenador futuro deve
+cancelar a conexão antiga antes de iniciar outra. O editor e o scroll também
+incluem a geração, impedindo undo de texto de uma sessão anterior.
+
+O app solicita o snapshot inicial por esse transporte e o mock o entrega antes
+das ações de UI no primeiro frame. `RequestSnapshot` é o único comando de backend
+neste incremento; mensagens e reações continuam no reducer local. Requisitar
+outro snapshot mock repõe seus dados de demonstração. Não há HTTP, WebSocket,
+login, cofre, runtime async ou código Serein incorporado nesta fundação.
 
 Evitar a dependência cíclica UI/input: as duas produzem comandos, estado é a
 fonte de verdade. Backend futuro deve emitir eventos em fila limitada com
@@ -137,9 +170,10 @@ Unicode e ID opcional da mensagem respondida. `UpdateDraft`, `SendDraft`,
 `ReplyTo` e `CancelReply` são comandos independentes do dispositivo. A UI mantém
 somente o buffer do editor e estado de composição/foco. Cada conversa tem um ID
 egui distinto, isolando cursor e undo. Rascunhos vivem só em memória, limitados
-pelos canais do snapshot mock; as chaves atuais são índices servidor/canal.
-Antes de snapshots reais/reordenação, migrar para IDs estáveis de conversa e
-estabelecer orçamento global/expiração para rascunhos e estado dos editores.
+pelos canais do snapshot; as chaves são identidades conta/canal. Editor, undo e
+scroll incluem também a geração da sessão. Antes de dados reais, estabelecer
+orçamento global/expiração para rascunhos e estado dos editores, além de limites
+de bytes nos adaptadores de protocolo.
 
 Enter envia apenas sem modificadores, com foco no editor, sem repetição e sem
 composição IME ativa; Shift+Enter insere linha. Frames com eventos IME não enviam
