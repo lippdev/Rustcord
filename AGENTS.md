@@ -7,8 +7,13 @@
 - Não usar Electron, Chromium, WebView ou carregar discord.com/app.
 - Gamepad/TV/Console Mode não são prioridade atual; adaptador experimental fica
   opcional e fora do build/runtime padrão.
-- Backend atual é mock. Não implementar self-bot, tokens pessoais, endpoints
-  privados ou bypasses. Conferir limites oficiais antes de integração real.
+- Construir um cliente alternativo open source para conta pessoal, com login
+  nativo e interoperabilidade de rede. O usuário autorizou essa direção em
+  07/10/2026, substituindo a restrição anterior ao backend mock.
+- Não contornar MFA/CAPTCHA, extrair sessões de outros aplicativos ou automatizar
+  spam. Credenciais somente no processo/cofre, nunca em logs, chat ou commits.
+- Não confundir interoperabilidade com aprovação oficial do Discord. Validar
+  consumo de RAM com medições; não prometer economia antes de medir.
 - Manter domínio/backend, estado, UI, input e plataforma separados.
 
 ## Processo solicitado pelo usuário

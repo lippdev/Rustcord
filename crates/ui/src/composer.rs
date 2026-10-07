@@ -50,10 +50,14 @@ impl ComposerInput {
 }
 impl Rustcord {
     pub(super) fn composer_id(&self) -> egui::Id {
-        egui::Id::new(("composer", self.state.server, self.state.channel))
+        egui::Id::new((
+            "composer",
+            self.state.generation(),
+            self.state.conversation(),
+        ))
     }
     pub(super) fn composer_panel(&mut self, root: &mut egui::Ui) {
-        let key = (self.state.server, self.state.channel);
+        let key = (self.state.generation(), self.state.conversation());
         if key != self.draft_conversation {
             self.composer_input = ComposerInput::default();
             self.draft_conversation = key;
@@ -260,8 +264,27 @@ mod tests {
         let ctx = egui::Context::default();
         let cc = eframe::CreationContext::_new_kittest(ctx.clone());
         let mut app = Rustcord::new(&cc, std::time::Instant::now(), false, false);
+        app.demo = true;
         app_frame(&mut app, &ctx, vec![]);
         (app, ctx)
+    }
+    #[test]
+    fn login_screen_does_not_mount_the_mock_composer_or_process_send_keys() {
+        let ctx = egui::Context::default();
+        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let mut app = Rustcord::new(&cc, std::time::Instant::now(), false, false);
+        app_frame(
+            &mut app,
+            &ctx,
+            vec![
+                egui::Event::Text("must not send".into()),
+                enter(egui::Modifiers::NONE, false),
+            ],
+        );
+        assert!(!app.demo);
+        assert!(app.state.messages().is_empty());
+        assert!(app.state.draft().is_none());
+        assert!(!ctx.memory(|m| m.has_focus(app.composer_id())));
     }
     #[test]
     fn keyboard_reply_focuses_editor_and_escape_preserves_written_draft() {
@@ -355,13 +378,13 @@ mod tests {
             &mut app,
             &ctx,
             vec![
-                egui::Event::ModifiersChanged(egui::Modifiers::CTRL),
+                egui::Event::ModifiersChanged(egui::Modifiers::COMMAND),
                 egui::Event::Key {
                     key: egui::Key::Z,
                     physical_key: None,
                     pressed: true,
                     repeat: false,
-                    modifiers: egui::Modifiers::CTRL,
+                    modifiers: egui::Modifiers::COMMAND,
                 },
             ],
         );
@@ -369,6 +392,76 @@ mod tests {
         app.state.dispatch(AppAction::SwitchChannel(-1));
         app_frame(&mut app, &ctx, vec![]);
         assert_eq!(app.draft, "first channel draft");
+    }
+    #[test]
+    fn snapshot_reorder_preserves_editor_identity_and_undo() {
+        let (mut app, ctx) = native_test_app();
+        let id = app.composer_id();
+        ctx.memory_mut(|m| m.request_focus(id));
+        app_frame(
+            &mut app,
+            &ctx,
+            vec![egui::Event::Text("stable editor".into())],
+        );
+        let mut next = app.state.data.clone();
+        next.servers.reverse();
+        for server in &mut next.servers {
+            server.channels.reverse();
+        }
+        app.state.replace_snapshot(next).unwrap();
+        app_frame(&mut app, &ctx, vec![]);
+        assert_eq!(app.composer_id(), id);
+        assert_eq!(app.draft, "stable editor");
+        assert!(ctx.memory(|m| m.has_focus(id)));
+        app_frame(
+            &mut app,
+            &ctx,
+            vec![
+                egui::Event::ModifiersChanged(egui::Modifiers::COMMAND),
+                egui::Event::Key {
+                    key: egui::Key::Z,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::COMMAND,
+                },
+            ],
+        );
+        assert!(app.state.draft().is_none());
+    }
+    #[test]
+    fn a_new_session_cannot_undo_into_the_previous_sessions_text() {
+        let (mut app, ctx) = native_test_app();
+        let old_editor = app.composer_id();
+        ctx.memory_mut(|m| m.request_focus(old_editor));
+        app_frame(
+            &mut app,
+            &ctx,
+            vec![egui::Event::Text("previous session".into())],
+        );
+        let data = app.state.data.clone();
+        app.state.begin_session().unwrap();
+        app.state.replace_snapshot(data).unwrap();
+        let new_editor = app.composer_id();
+        assert_ne!(new_editor, old_editor);
+        app_frame(&mut app, &ctx, vec![]);
+        ctx.memory_mut(|m| m.request_focus(new_editor));
+        app_frame(
+            &mut app,
+            &ctx,
+            vec![
+                egui::Event::ModifiersChanged(egui::Modifiers::COMMAND),
+                egui::Event::Key {
+                    key: egui::Key::Z,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::COMMAND,
+                },
+            ],
+        );
+        assert!(app.state.draft().is_none());
+        assert!(app.draft.is_empty());
     }
     #[test]
     fn only_plain_non_repeated_enter_sends_from_an_enabled_editor() {

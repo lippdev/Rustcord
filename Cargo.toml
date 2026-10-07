@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/app", "crates/app-state", "crates/discord-core", "crates/input", "crates/ui", "crates/platform"]
+members = ["crates/app", "crates/app-state", "crates/discord-core", "crates/discord-network", "crates/input", "crates/ui", "crates/platform"]
 resolver = "2"
 
 [workspace.package]

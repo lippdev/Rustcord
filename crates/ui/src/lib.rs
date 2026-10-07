@@ -1,6 +1,9 @@
 //! Discord-style native desktop frontend. No webview or controller runtime.
 mod composer;
-use app_state::{AppState, Screen};
+mod login;
+mod online;
+use app_state::{AppState, ConversationId, Screen};
+use discord_core::{AccountId, Backend, BackendCommand, BackendConnection, MockBackend, Snapshot};
 use eframe::egui::{self, Color32, RichText, Stroke, Vec2};
 use input::{AppAction, Key, Region};
 use platform::Metrics;
@@ -15,19 +18,23 @@ const BLURPLE: Color32 = Color32::from_rgb(88, 101, 242);
 const GREEN: Color32 = Color32::from_rgb(35, 165, 90);
 
 pub struct Rustcord {
+    online: online::OnlineView,
+    demo: bool,
     state: AppState,
+    backend: MockBackend,
+    connection: BackendConnection,
     metrics: Metrics,
     started: Instant,
     first_frame: bool,
     draft: String,
-    draft_conversation: (usize, usize),
+    draft_conversation: (app_state::SessionGeneration, Option<ConversationId>),
     composer_input: composer::ComposerInput,
     focus_composer: bool,
     context_anchor: egui::Pos2,
     smoke: bool,
     smoke_step: usize,
     smoke_done: bool,
-    last_conversation: (usize, usize),
+    last_conversation: (app_state::SessionGeneration, Option<ConversationId>),
     last_message_count: usize,
 }
 impl Rustcord {
@@ -55,25 +62,73 @@ impl Rustcord {
             .text_styles
             .insert(egui::TextStyle::Button, egui::FontId::proportional(15.0));
         cc.egui_ctx.set_style_of(egui::Theme::Dark, style);
-        let mut state = AppState::default();
+        if let Some(bytes) = platform::system_symbol_font() {
+            let mut fonts = egui::FontDefinitions::default();
+            fonts.font_data.insert(
+                "system-symbols".into(),
+                std::sync::Arc::new(egui::FontData::from_owned(bytes)),
+            );
+            for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
+                fonts
+                    .families
+                    .entry(family)
+                    .or_default()
+                    .push("system-symbols".into());
+            }
+            cc.egui_ctx.set_fonts(fonts);
+        }
+        let mut state = AppState::new(Snapshot {
+            avatar: Default::default(),
+            account: AccountId::new(0),
+            servers: Vec::new(),
+            profile: String::new(),
+        });
         if metrics {
             state.metrics = true;
         }
+        let wake = cc.egui_ctx.clone();
+        let (backend, connection) =
+            MockBackend::connect(state.generation(), move || wake.request_repaint());
+        connection
+            .try_command(BackendCommand::RequestSnapshot)
+            .expect("empty command queue");
         Self {
+            online: online::OnlineView::default(),
+            demo: smoke,
             state,
+            backend,
+            connection,
             metrics: Metrics::new(started),
             started,
             first_frame: true,
             draft: String::new(),
-            draft_conversation: (usize::MAX, usize::MAX),
+            draft_conversation: (app_state::SessionGeneration::INITIAL, None),
             composer_input: composer::ComposerInput::default(),
             focus_composer: false,
             context_anchor: egui::pos2(520.0, 240.0),
             smoke,
             smoke_step: 0,
             smoke_done: false,
-            last_conversation: (usize::MAX, usize::MAX),
+            last_conversation: (app_state::SessionGeneration::INITIAL, None),
             last_message_count: 0,
+        }
+    }
+    fn backend_events(&mut self) {
+        self.backend.poll();
+        // Bound work per frame; adapters wake the UI only when they enqueue events.
+        for _ in 0..discord_core::BACKEND_QUEUE_CAPACITY {
+            match self.connection.try_event() {
+                Ok(Some(event)) => {
+                    if self.state.apply_backend_event(event).is_err() {
+                        self.state.notice = "Backend snapshot has duplicate identities".into();
+                    }
+                }
+                Ok(None) => break,
+                Err(_) => {
+                    self.state.notice = "Backend connection closed".into();
+                    break;
+                }
+            }
         }
     }
     fn actions(&mut self, ctx: &egui::Context) {
@@ -315,7 +370,7 @@ impl Rustcord {
                         });
                     });
                 self.composer_panel(ui);
-                let conversation = (self.state.server, self.state.channel);
+                let conversation = (self.state.generation(), self.state.conversation());
                 let scroll_bottom = conversation != self.last_conversation
                     || self.state.messages().len() != self.last_message_count;
                 self.last_conversation = conversation;
@@ -546,6 +601,19 @@ impl Rustcord {
 }
 impl eframe::App for Rustcord {
     fn ui(&mut self, root: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        if !self.demo {
+            self.demo = self.online.ui(root);
+            return;
+        }
+        egui::Panel::top("demo-banner").show(root, |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Demonstração local — dados fictícios");
+                if ui.button("Voltar ao login").clicked() {
+                    self.demo = false;
+                }
+            });
+        });
+        self.backend_events();
         let start = Instant::now();
         let ctx = root.ctx().clone();
         self.actions(&ctx);

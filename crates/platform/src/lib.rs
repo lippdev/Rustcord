@@ -1,4 +1,43 @@
 //! Lightweight platform metrics; no whole-system process scanner.
+/// Optional OS font fallback. Never bundle proprietary system fonts or scan user files.
+pub fn system_symbol_font() -> Option<Vec<u8>> {
+    use std::{io::Read, path::PathBuf};
+    #[cfg(target_os = "macos")]
+    let candidates = vec![PathBuf::from("/System/Library/Fonts/Apple Symbols.ttf")];
+    #[cfg(windows)]
+    let candidates = vec![
+        PathBuf::from(std::env::var_os("WINDIR").unwrap_or_else(|| "C:\\Windows".into()))
+            .join("Fonts")
+            .join("seguisym.ttf"),
+    ];
+    #[cfg(target_os = "linux")]
+    let candidates = vec![
+        PathBuf::from("/usr/share/fonts/truetype/noto/NotoSansSymbols2-Regular.ttf"),
+        PathBuf::from("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+    ];
+    #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
+    let candidates: Vec<PathBuf> = Vec::new();
+    const LIMIT: u64 = 4 * 1024 * 1024;
+    for path in candidates {
+        let Ok(file) = std::fs::File::open(path) else {
+            continue;
+        };
+        let Ok(metadata) = file.metadata() else {
+            continue;
+        };
+        if metadata.len() > LIMIT {
+            continue;
+        }
+        let mut bytes = Vec::new();
+        if file.take(LIMIT + 1).read_to_end(&mut bytes).is_err() || bytes.len() > LIMIT as usize {
+            continue;
+        }
+        if bytes.starts_with(&[0, 1, 0, 0]) || bytes.starts_with(b"OTTO") {
+            return Some(bytes);
+        }
+    }
+    None
+}
 use std::{
     collections::VecDeque,
     time::{Duration, Instant},
