@@ -23,6 +23,7 @@ pub struct Rustcord {
     draft_conversation: (usize, usize),
     composer_input: composer::ComposerInput,
     focus_composer: bool,
+    context_anchor: egui::Pos2,
     smoke: bool,
     smoke_step: usize,
     smoke_done: bool,
@@ -67,6 +68,7 @@ impl Rustcord {
             draft_conversation: (usize::MAX, usize::MAX),
             composer_input: composer::ComposerInput::default(),
             focus_composer: false,
+            context_anchor: egui::pos2(520.0, 240.0),
             smoke,
             smoke_step: 0,
             smoke_done: false,
@@ -78,7 +80,15 @@ impl Rustcord {
         let typing =
             self.state.screen == Screen::Main && ctx.memory(|m| m.has_focus(self.composer_id()));
         for action in keyboard_actions(ctx, typing) {
-            self.state.dispatch(action);
+            if action == AppAction::Confirm && self.state.screen == Screen::Context {
+                self.confirm_context(ctx);
+            } else {
+                let reply = action == AppAction::Reply && self.state.screen == Screen::Main;
+                self.state.dispatch(action);
+                if reply && self.state.reply_target().is_some() {
+                    self.focus_composer = true;
+                }
+            }
         }
         if self.smoke {
             let script = [
@@ -86,6 +96,7 @@ impl Rustcord {
                 AppAction::Select(Region::Channels, 1),
                 AppAction::Submit("Hello from Rustcord. This message is stored locally.".into()),
                 AppAction::Context,
+                AppAction::SelectMenu(1),
                 AppAction::Confirm,
                 AppAction::Menu,
                 AppAction::Back,
@@ -354,6 +365,34 @@ impl Rustcord {
                                             false,
                                         );
                                         ui.vertical(|ui| {
+                                            if let Some(id) = message.reply_to {
+                                                let preview = self
+                                                    .state
+                                                    .messages()
+                                                    .iter()
+                                                    .find(|m| m.id == id)
+                                                    .map_or_else(
+                                                        || {
+                                                            "Original message unavailable"
+                                                                .to_owned()
+                                                        },
+                                                        |m| {
+                                                            format!(
+                                                                "Reply to {} · {}",
+                                                                m.author,
+                                                                message_preview(&m.text)
+                                                            )
+                                                        },
+                                                    );
+                                                ui.add(
+                                                    egui::Label::new(
+                                                        RichText::new(preview)
+                                                            .size(12.0)
+                                                            .color(MUTED),
+                                                    )
+                                                    .truncate(),
+                                                );
+                                            }
                                             ui.horizontal(|ui| {
                                                 ui.label(
                                                     RichText::new(&message.author)
@@ -376,7 +415,6 @@ impl Rustcord {
                                                         .color(Color32::from_rgb(219, 222, 225)),
                                                 )
                                                 .wrap()
-                                                .selectable(true)
                                                 .selectable(true),
                                             );
                                             if message.reactions > 0
@@ -398,7 +436,7 @@ impl Rustcord {
                                 if ui.input(|input| {
                                     input.pointer.button_clicked(egui::PointerButton::Secondary)
                                 }) {
-                                    context = Some(i);
+                                    context = Some((i, pointer.unwrap()));
                                 }
                             }
                             if scroll_bottom && i + 1 == self.state.messages().len() {
@@ -409,7 +447,11 @@ impl Rustcord {
                             self.state
                                 .dispatch(AppAction::Select(Region::Conversation, i));
                         }
-                        if let Some(i) = context {
+                        if let Some((i, anchor)) = context {
+                            self.context_anchor = anchor;
+                            if self.state.screen == Screen::Context {
+                                self.state.dispatch(AppAction::Back);
+                            }
                             self.state
                                 .dispatch(AppAction::Select(Region::Conversation, i));
                             self.state.dispatch(AppAction::Context);
@@ -422,34 +464,66 @@ impl Rustcord {
                     });
             });
     }
+    fn confirm_context(&mut self, ctx: &egui::Context) {
+        if self.state.menu_item == 2
+            && let Some(message) = self.state.messages().get(self.state.message)
+        {
+            ctx.copy_text(message.text.clone());
+        }
+        let reply = self.state.menu_item == 0;
+        self.state.dispatch(AppAction::Confirm);
+        if reply && self.state.reply_target().is_some() {
+            self.focus_composer = true;
+        }
+    }
     fn modal(&mut self, ctx: &egui::Context) {
-        let screen = self.state.screen;
-        if screen == Screen::Main {
+        if self.state.screen == Screen::Context {
+            let mut open = true;
+            egui::Popup::new(
+                egui::Id::new("message-context"),
+                ctx.clone(),
+                self.context_anchor,
+                egui::LayerId::background(),
+            )
+            .kind(egui::PopupKind::Menu)
+            .open_bool(&mut open)
+            .width(210.0)
+            .show(|ui| {
+                for (i, label) in ["Reply", "Toggle local reaction", "Copy text", "Close"]
+                    .iter()
+                    .enumerate()
+                {
+                    if ui
+                        .add_sized(
+                            [ui.available_width(), 30.0],
+                            egui::Button::new(*label).selected(self.state.menu_item == i),
+                        )
+                        .clicked()
+                    {
+                        self.state.dispatch(AppAction::SelectMenu(i));
+                        self.confirm_context(ctx);
+                    }
+                }
+            });
+            if !open && self.state.screen == Screen::Context {
+                self.state.dispatch(AppAction::Back);
+            }
             return;
         }
-        egui::Modal::new(egui::Id::new("settings-context")).show(ctx, |ui| {
+        if self.state.screen != Screen::Settings {
+            return;
+        }
+        egui::Modal::new(egui::Id::new("settings")).show(ctx, |ui| {
             ui.set_width(360.0);
-            ui.heading(match screen {
-                Screen::Settings => "User Settings",
-                Screen::Context => "Message",
-                _ => "Reply",
-            });
+            ui.heading("User Settings");
             ui.add_space(12.0);
-            let labels: Vec<String> = match screen {
-                Screen::Settings => vec![
-                    format!(
-                        "Performance metrics: {}",
-                        if self.state.metrics { "On" } else { "Off" }
-                    ),
-                    "Close".into(),
-                ],
-                Screen::Context => vec!["Toggle local reaction".into(), "Close".into()],
-                _ => vec![
-                    "Count me in!".into(),
-                    "Let's play tonight.".into(),
-                    "Cancel".into(),
-                ],
-            };
+            let labels = [
+                format!(
+                    "Performance metrics: {}",
+                    if self.state.metrics { "On" } else { "Off" }
+                ),
+                "Close".into(),
+            ];
             for (i, label) in labels.iter().enumerate() {
                 if ui
                     .add_sized([ui.available_width(), 34.0], egui::Button::new(label))
@@ -459,16 +533,14 @@ impl Rustcord {
                     self.state.dispatch(AppAction::Confirm);
                 }
             }
-            if screen == Screen::Settings {
-                ui.add_space(12.0);
-                ui.label(
-                    RichText::new(
-                        "Rustcord · native Rust frontend\nMock backend · no account signed in",
-                    )
-                    .size(12.0)
-                    .color(MUTED),
-                );
-            }
+            ui.add_space(12.0);
+            ui.label(
+                RichText::new(
+                    "Rustcord · native Rust frontend\nMock backend · no account signed in",
+                )
+                .size(12.0)
+                .color(MUTED),
+            );
         });
     }
 }
@@ -507,6 +579,12 @@ impl eframe::App for Rustcord {
         self.modal(&ctx);
         self.metrics.frame(start.elapsed());
     }
+}
+fn message_preview(text: &str) -> String {
+    text.chars()
+        .map(|c| if c.is_whitespace() { ' ' } else { c })
+        .take(90)
+        .collect()
 }
 fn author_color(i: usize) -> Color32 {
     [

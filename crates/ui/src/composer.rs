@@ -77,11 +77,35 @@ impl Rustcord {
             .fonts_mut(|f| f.layout(self.draft.clone(), font, TEXT, width).rows.len())
             .clamp(1, 6);
         let editor_height = rows as f32 * line_height + 6.0;
+        let reply = self.state.draft().and_then(|d| d.reply_to).map(|_| {
+            self.state.reply_target().map_or_else(
+                || "Original message unavailable".to_owned(),
+                |m| {
+                    format!(
+                        "Replying to {} · {}",
+                        m.author,
+                        super::message_preview(&m.text)
+                    )
+                },
+            )
+        });
         egui::Panel::bottom("composer-panel")
-            .exact_size(editor_height + 66.0)
+            .exact_size(editor_height + 66.0 + if reply.is_some() { 28.0 } else { 0.0 })
             .resizable(false)
             .frame(egui::Frame::new().fill(CHAT).inner_margin(16))
             .show(root, |ui| {
+                if let Some(reply) = reply {
+                    ui.horizontal(|ui| {
+                        if ui.small_button("Cancel reply").clicked() {
+                            self.state.dispatch(AppAction::CancelReply);
+                        }
+                        ui.add(
+                            egui::Label::new(egui::RichText::new(reply).size(12.0).color(MUTED))
+                                .truncate(),
+                        );
+                    });
+                    ui.add_space(4.0);
+                }
                 egui::Frame::new()
                     .fill(Color32::from_rgb(56, 58, 64))
                     .inner_margin(10)
@@ -192,7 +216,11 @@ mod tests {
             modifiers,
         }
     }
-    fn app_frame(app: &mut Rustcord, ctx: &egui::Context, mut events: Vec<egui::Event>) {
+    fn app_frame(
+        app: &mut Rustcord,
+        ctx: &egui::Context,
+        mut events: Vec<egui::Event>,
+    ) -> egui::PlatformOutput {
         // Model physical key taps, including key-up; egui derives repeat from held keys.
         let releases: Vec<_> = events
             .iter()
@@ -226,6 +254,7 @@ mod tests {
             |ui| eframe::App::ui(app, ui, &mut eframe::Frame::_new_kittest()),
         );
         out.textures_delta.clear();
+        out.platform_output
     }
     fn native_test_app() -> (Rustcord, egui::Context) {
         let ctx = egui::Context::default();
@@ -233,6 +262,49 @@ mod tests {
         let mut app = Rustcord::new(&cc, std::time::Instant::now(), false, false);
         app_frame(&mut app, &ctx, vec![]);
         (app, ctx)
+    }
+    #[test]
+    fn keyboard_reply_focuses_editor_and_escape_preserves_written_draft() {
+        let (mut app, ctx) = native_test_app();
+        app.state
+            .dispatch(AppAction::Select(input::Region::Conversation, 1));
+        let target = app.state.messages()[1].id;
+        let mut f3 = enter(egui::Modifiers::NONE, false);
+        if let egui::Event::Key { key, .. } = &mut f3 {
+            *key = egui::Key::F3;
+        }
+        app_frame(&mut app, &ctx, vec![f3.clone()]);
+        assert!(ctx.memory(|m| m.has_focus(app.composer_id())));
+        assert_eq!(app.state.reply_target().unwrap().id, target);
+        app_frame(&mut app, &ctx, vec![egui::Event::Text("my reply".into())]);
+        let mut escape = enter(egui::Modifiers::NONE, false);
+        if let egui::Event::Key { key, .. } = &mut escape {
+            *key = egui::Key::Escape;
+        }
+        app_frame(&mut app, &ctx, vec![escape]);
+        assert!(app.state.reply_target().is_none());
+        assert_eq!(app.state.draft().unwrap().text, "my reply");
+        app_frame(&mut app, &ctx, vec![f3]);
+        app_frame(&mut app, &ctx, vec![enter(egui::Modifiers::NONE, false)]);
+        assert_eq!(app.state.messages().last().unwrap().reply_to, Some(target));
+    }
+    #[test]
+    fn context_copy_emits_full_text_without_sending_a_message() {
+        let (mut app, ctx) = native_test_app();
+        app.state
+            .dispatch(AppAction::Select(input::Region::Conversation, 1));
+        let text = app.state.messages()[1].text.clone();
+        let count = app.state.messages().len();
+        app.state.dispatch(AppAction::Context);
+        app.state.dispatch(AppAction::SelectMenu(2));
+        let out = app_frame(&mut app, &ctx, vec![enter(egui::Modifiers::NONE, false)]);
+        assert!(
+            out.commands
+                .iter()
+                .any(|c| matches!(c, egui::OutputCommand::CopyText(t) if *t == text))
+        );
+        assert_eq!(app.state.messages().len(), count);
+        assert_eq!(app.state.screen, app_state::Screen::Main);
     }
     #[test]
     fn native_editor_shift_enter_then_enter_sends_exactly_one_multiline_message() {

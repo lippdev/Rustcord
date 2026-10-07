@@ -13,7 +13,6 @@ pub enum Screen {
     Main,
     Settings,
     Context,
-    Reply,
 }
 pub struct AppState {
     pub data: Snapshot,
@@ -74,9 +73,8 @@ impl AppState {
     }
     pub fn menu_len(&self) -> usize {
         match self.screen {
-            Screen::Reply => 3,
             Screen::Settings => 2,
-            Screen::Context => 2,
+            Screen::Context => 4,
             Screen::Main => 0,
         }
     }
@@ -230,10 +228,14 @@ impl AppState {
                 }
                 AppAction::Confirm => match (self.screen, self.menu_item) {
                     (Screen::Settings, 0) => self.metrics = !self.metrics,
-                    (Screen::Reply, i @ 0..=1) => {
-                        self.send(["Count me in!", "Let's play tonight."][i].into())
+                    (Screen::Context, 0) => {
+                        if let Some(id) = self.messages().get(self.message).map(|m| m.id) {
+                            self.reply_to(id);
+                        } else {
+                            self.screen = Screen::Main;
+                        }
                     }
-                    (Screen::Context, 0) => self.react(),
+                    (Screen::Context, 1) => self.react(),
                     _ => self.screen = Screen::Main,
                 },
                 _ => {}
@@ -241,6 +243,9 @@ impl AppState {
             return;
         }
         match action {
+            AppAction::Back if self.draft().is_some_and(|d| d.reply_to.is_some()) => {
+                self.dispatch(AppAction::CancelReply);
+            }
             AppAction::Navigate(Direction::Left) | AppAction::PreviousRegion | AppAction::Back => {
                 self.region_step(-1)
             }
@@ -291,7 +296,11 @@ impl AppState {
                 }
             }
             AppAction::Context => self.open(Screen::Context),
-            AppAction::Reply => self.open(Screen::Reply),
+            AppAction::Reply => {
+                if let Some(id) = self.messages().get(self.message).map(|m| m.id) {
+                    self.reply_to(id);
+                }
+            }
             _ => {}
         }
     }
@@ -395,9 +404,13 @@ mod tests {
         s.dispatch(AppAction::Confirm);
         assert_eq!(s.region, Region::Conversation);
         s.dispatch(AppAction::Reply);
-        s.dispatch(AppAction::Confirm);
-        assert_eq!(s.messages().last().unwrap().text, "Count me in!");
+        assert_eq!(s.screen, Screen::Main);
+        let target = s.messages()[s.message].id;
+        s.dispatch(AppAction::UpdateDraft("Written reply".into()));
+        s.dispatch(AppAction::SendDraft);
+        assert_eq!(s.messages().last().unwrap().reply_to, Some(target));
         s.dispatch(AppAction::Context);
+        s.dispatch(AppAction::SelectMenu(1));
         s.dispatch(AppAction::Confirm);
         assert_eq!(s.messages().last().unwrap().reactions, 1);
         s.dispatch(AppAction::Menu);
@@ -407,6 +420,20 @@ mod tests {
         assert_eq!(s.region, Region::Conversation);
         s.dispatch(AppAction::Back);
         assert_eq!(s.region, Region::Channels);
+    }
+    #[test]
+    fn escape_cancels_reply_without_losing_text_or_selection() {
+        let mut s = AppState::default();
+        s.dispatch(AppAction::Select(Region::Conversation, 2));
+        s.dispatch(AppAction::Reply);
+        s.dispatch(AppAction::UpdateDraft("still writing".into()));
+        s.dispatch(AppAction::Back);
+        assert!(s.reply_target().is_none());
+        assert_eq!(s.draft().unwrap().text, "still writing");
+        assert_eq!((s.region, s.message), (Region::Conversation, 2));
+        s.dispatch(AppAction::Context);
+        s.dispatch(AppAction::Confirm);
+        assert_eq!(s.reply_target().unwrap().id, s.messages()[2].id);
     }
     #[test]
     fn modal_captures_navigation_and_switching() {
