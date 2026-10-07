@@ -3,6 +3,17 @@
 Nome definido pelo usuário. Projeto independente, Rust, Windows primeiro. Milestone 1 é
 uma demonstração local de UX, não um cliente conectado ao Discord.
 
+## Direção após a discovery de clientes nativos
+
+O usuário confirmou o objetivo de um cliente alternativo de conta pessoal sem
+WebView. A [discovery](native-backend-discovery.md) compara implementações,
+licenças, login e um experimento de extração do backend Serein. Essa direção
+substitui a proposta de converter o produto em companion/bot. As restrições de
+API descritas abaixo permanecem relevantes, mas aprovação oficial não é uma
+dependência técnica de compilação/conexão. Interoperabilidade e autorização
+contratual são questões distintas. O app atual permanece mock; a discovery não
+implementou autenticação nem confirmou funcionamento com conta real.
+
 ## Pesquisa e limite de produto (07/10/2026)
 
 A API oficial não oferece autorização geral para substituir o cliente de uma
