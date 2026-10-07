@@ -1,4 +1,5 @@
 //! Discord-style native desktop frontend. No webview or controller runtime.
+mod composer;
 use app_state::{AppState, Screen};
 use eframe::egui::{self, Color32, RichText, Stroke, Vec2};
 use input::{AppAction, Key, Region};
@@ -19,6 +20,9 @@ pub struct Rustcord {
     started: Instant,
     first_frame: bool,
     draft: String,
+    draft_conversation: (usize, usize),
+    composer_input: composer::ComposerInput,
+    focus_composer: bool,
     smoke: bool,
     smoke_step: usize,
     smoke_done: bool,
@@ -60,6 +64,9 @@ impl Rustcord {
             started,
             first_frame: true,
             draft: String::new(),
+            draft_conversation: (usize::MAX, usize::MAX),
+            composer_input: composer::ComposerInput::default(),
+            focus_composer: false,
             smoke,
             smoke_step: 0,
             smoke_done: false,
@@ -68,8 +75,8 @@ impl Rustcord {
         }
     }
     fn actions(&mut self, ctx: &egui::Context) {
-        let typing = self.state.screen == Screen::Main
-            && ctx.memory(|m| m.has_focus(egui::Id::new("composer")));
+        let typing =
+            self.state.screen == Screen::Main && ctx.memory(|m| m.has_focus(self.composer_id()));
         for action in keyboard_actions(ctx, typing) {
             self.state.dispatch(action);
         }
@@ -296,50 +303,7 @@ impl Rustcord {
                             }
                         });
                     });
-                egui::Panel::bottom("composer-panel")
-                    .exact_size(90.0)
-                    .resizable(false)
-                    .frame(egui::Frame::new().fill(CHAT).inner_margin(16))
-                    .show(ui, |ui| {
-                        egui::Frame::new()
-                            .fill(Color32::from_rgb(56, 58, 64))
-                            .inner_margin(10)
-                            .corner_radius(8)
-                            .show(ui, |ui| {
-                                ui.horizontal(|ui| {
-                                    ui.label(RichText::new("+").size(24.0).color(MUTED));
-                                    let channel = self
-                                        .state
-                                        .channels()
-                                        .get(self.state.channel)
-                                        .map_or("channel", |c| c.name.as_str());
-                                    let editor = ui.add_enabled(
-                                        self.state.screen == Screen::Main,
-                                        egui::TextEdit::singleline(&mut self.draft)
-                                            .id(egui::Id::new("composer"))
-                                            .hint_text(format!("Message #{channel}"))
-                                            .frame(egui::Frame::NONE)
-                                            .char_limit(2000)
-                                            .desired_width((ui.available_width() - 60.0).max(40.0)),
-                                    );
-                                    let entered = editor.lost_focus()
-                                        && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                                    if (ui.button("Send").clicked() || entered)
-                                        && !self.draft.trim().is_empty()
-                                    {
-                                        self.state.dispatch(AppAction::Submit(std::mem::take(
-                                            &mut self.draft,
-                                        )));
-                                        editor.request_focus();
-                                    }
-                                });
-                            });
-                        ui.label(
-                            RichText::new("Local mock · messages stay in this session")
-                                .size(10.0)
-                                .color(MUTED),
-                        );
-                    });
+                self.composer_panel(ui);
                 let conversation = (self.state.server, self.state.channel);
                 let scroll_bottom = conversation != self.last_conversation
                     || self.state.messages().len() != self.last_message_count;
