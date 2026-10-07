@@ -5,7 +5,7 @@ fn main() -> eframe::Result {
     let smoke = std::env::args().any(|a| a == "--smoke-test");
     let metrics = std::env::args().any(|a| a == "--metrics");
     eframe::run_native(
-        "Rustcord — mock",
+        "Rustcord",
         eframe::NativeOptions {
             viewport: eframe::egui::ViewportBuilder::default()
                 .with_inner_size([1280.0, 800.0])
